@@ -3,7 +3,7 @@
 Covers XRPL-044, 045, 046, 047 (check-in) and XRPL-037 (in-app resale policy).
 Status: **check-in works end to end on Testnet.** The attendee approves in Xaman (Agent B's sign
 requests, XRPL-011), ownership is read from XRPL (Agent B's read service, XRPL-007), and admission is
-recorded once in Postgres. Who may scan is still an interim rule until roles (XRPL-013) land.
+recorded once in Postgres. Who may scan follows Agent A's permission rule (XRPL-013): the event's owner.
 
 | File | What it is |
 |---|---|
@@ -14,7 +14,7 @@ recorded once in Postgres. Who may scan is still an interim rule until roles (XR
 | [`src/features/checkin/xrpl-ownership.ts`](../src/features/checkin/xrpl-ownership.ts) | Adapter for Agent B's `verifyOwner` |
 | [`src/features/checkin/xaman-proof.ts`](../src/features/checkin/xaman-proof.ts) | Wallet approval via Xaman SignIn, bound to one challenge |
 | [`src/features/checkin/checkin-code-panel.tsx`](../src/features/checkin/checkin-code-panel.tsx) | Attendee "Show check-in code" panel (`/checkin/:ticketId`) |
-| [`src/features/checkin/organiser-access.ts`](../src/features/checkin/organiser-access.ts) | Interim "who may scan" rule |
+| [`src/features/checkin/organiser-access.ts`](../src/features/checkin/organiser-access.ts) | Who may scan: delegates to Agent A's `isEventOwner` (XRPL-013) |
 | [`src/features/checkin/server.ts`](../src/features/checkin/server.ts) | Route wiring and QR secret |
 | [`src/app/api/checkin/`](../src/app/api/checkin/) | Route handlers |
 | [`src/lib/resale-policy/resale-policy.ts`](../src/lib/resale-policy/resale-policy.ts) | `ResalePolicyPort` implementation |
@@ -109,7 +109,7 @@ Failures use the standard envelope `{ error: { code: <status>, message }, reques
 | From | What | Used by |
 |---|---|---|
 | A (XRPL-012) | Session with a verified wallet (optional now; used in preference to the named wallet) | `issueChallenge` |
-| A (XRPL-013) | Role check to replace the interim rule in `organiser-access.ts` | Scanner routes |
+| A (XRPL-013) | Done: `organiser-access.ts` delegates to `isEventOwner` ([docs/auth/permissions.md](auth/permissions.md)) | Scanner routes |
 | A (XRPL-020) | Real `InventoryPort.getAvailability` | Resale policy |
 | B (XRPL-036) | Real `OfferPort.listResaleOffers` (live offers only) | Resale listings |
 | C (XRPL-034) | Embed `<CheckInCodePanel ticketId />` on the ticket page (interim page: `/checkin/:ticketId`) | Attendee side |
@@ -132,14 +132,14 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 | Input | Now | Switch to |
 |---|---|---|
 | Tickets, challenges, check-ins | Prisma (live) | — |
-| Who may scan | Interim: the event's own seller (SELLER/ORGANISER role) | Agent A's role check (XRPL-013) |
+| Who may scan | The event's owner (the SELLER/ORGANISER who created it), via Agent A's `isEventOwner` (XRPL-013) | — |
 | XRPL ownership | Live: `XrplLedgerOwnership` over `getXrplQueryService().verifyOwner` (created on first use; any failure → 503 `LEDGER_UNAVAILABLE`) | — |
 | Wallet proof | Live: Xaman SignIn via `getWalletSignRequests()` (needs `XAMAN_API_KEY`/`SECRET`; else 503) | — |
 | QR key | `CHECKIN_QR_SECRET`, else derived from `SESSION_SECRET`, else (dev only) random per process | — |
 
 ## Organiser gate screen (XRPL-048)
 
-`/organiser/events/:id/checkin`, for the event's organiser only (interim: its seller).
+`/organiser/events/:id/checkin`, for the event's owner only (XRPL-013).
 
 - **Scanning:** the phone camera is offered where the browser can read QR codes itself (`BarcodeDetector`, e.g. Chrome on Android). The text box always works, including handheld scanners that type the code and press Enter. No extra library is added.
 - **Flow:** scan → `POST /api/checkin/verify` → green "Valid ticket" with an **Admit** button → `POST /api/checkin/confirm` → "Admitted" → "Scan next ticket". Every failure is shown as red "do not admit" or amber "try again" (ledger unreachable, not yet approved in wallet, no connection). There is never an Admit button for a failed check.

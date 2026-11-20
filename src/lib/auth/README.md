@@ -1,7 +1,7 @@
 # src/lib/auth — Agent A
 
-Sessions and onboarding (XRPL-010) and wallet sign-in / wallet-control proof (XRPL-012).
-Role enforcement (XRPL-013) builds on this module. Wallet design and verification details:
+Sessions and onboarding (XRPL-010), wallet sign-in / wallet-control proof (XRPL-012) and
+permissions (XRPL-013, [docs/auth/permissions.md](../../../docs/auth/permissions.md)). Wallet design and verification details:
 [docs/auth/wallet-sign-in.md](../../../docs/auth/wallet-sign-in.md).
 
 ## Using a session
@@ -12,6 +12,11 @@ Role enforcement (XRPL-013) builds on this module. Wallet design and verificatio
 | Route handler where sign-in is optional | `await getRequestSession(req)` | `AuthSession \| null` |
 | Server Component (page, layout) | `await getCurrentSession()` | `AuthSession \| null`; renders signed out if the DB is unreachable |
 | UI code using the integration ports | `sessionPort` from `session-port.ts` | implements `SessionPort` in `src/features/integration/ports.ts` |
+| Seller-only action (create an event) | `requireEventManager(session)` | 403 `ONBOARDING_REQUIRED` / `ROLE_REQUIRED` |
+| Event / tier / inventory write, mint, primary offers | `await requireEventOwner(db, session, eventId)` | 404 unknown event, 403 `NOT_EVENT_OWNER` |
+| Gate scanner, organiser dashboards | `isEventOwner(db, userId, eventId)` / `eventAccess(db)` | `boolean` / an `OrganiserAccess` |
+| Buying, accepting offers, check-in codes | `requireProvenWallet(session)` | the wallet address, or 403 `WALLET_NOT_VERIFIED` |
+| Resale / private / gift offers | `await requireTicketOwner(db, session, ticketId)` | ledger-verified holder, or 404 / 409 / 403 / 503 |
 
 `AuthSession` has `userId`, `displayName`, `role`, `onboardedAt`, `isDemo`, `method`,
 `expiresAt`, `walletAddress` and `walletVerifiedAt`.
@@ -20,8 +25,8 @@ Role enforcement (XRPL-013) builds on this module. Wallet design and verificatio
   accounts only) verified earlier by a wallet-signed proof and still linked. Shared demo personas count
   only a proof made in this session, so nobody inherits another demoer's wallet. `null` means wallet
   control is not proven. Value-moving actions are still signed in the user's own wallet.
-- **Hidden navigation is not authorisation.** Check the role on the server for every
-  write. XRPL-013 will add shared role guards.
+- **Hidden navigation is not authorisation.** Every write calls a guard from `permissions.ts` on
+  the server (see the table above and [docs/auth/permissions.md](../../../docs/auth/permissions.md)).
 
 ## Routes
 
