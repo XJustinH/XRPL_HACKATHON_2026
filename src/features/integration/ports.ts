@@ -31,6 +31,7 @@ import type {
   LedgerProof,
   NFTokenId,
   OfferIndex,
+  Page,
   ResaleEligibility,
   ResaleListing,
   SellerProfile,
@@ -44,16 +45,6 @@ import type {
 } from "@/contracts";
 
 /* ------------------------------------------------------------------ */
-
-/**
- * Cursor-paged result.
- *
- * Mirrors the shape produced by `pageOf()` in `src/contracts/common.ts`, which
- * ships the Zod helper but no standalone TypeScript type. Kept local rather than
- * added to the shared barrel to avoid claiming a cross-cutting name; worth
- * promoting to `common.ts` if another slice needs it.
- */
-export type Page<T> = { items: T[]; nextCursor: string | null };
 
 export type Session = {
   userId: string;
