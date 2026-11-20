@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { WalletConnectPanel } from "@/features/wallet/wallet-connect-panel";
+import { testTransactionsEnabled } from "@/lib/xrpl/wallet/test-transactions";
 
 export const metadata = { title: "Connect wallet" };
 
@@ -12,7 +13,7 @@ export default function ConnectPage() {
         title="Connect your wallet"
         description="You approve every transaction in your own wallet. This platform never asks for a seed phrase or private key."
       />
-      <WalletConnectPanel />
+      <WalletConnectPanel testTransactions={testTransactionsEnabled()} />
       <div className="mt-6">
         <NotImplementedNotice
           title="Linking your wallet to your account"

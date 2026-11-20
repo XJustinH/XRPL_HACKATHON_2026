@@ -124,6 +124,20 @@ describe("WalletConnectPanel", () => {
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
+  it("shows the developer transaction check only when the server enables it", async () => {
+    mockApi({});
+    const wallet = { address: ADDRESS, network: "TESTNET", connectedAt: "2026-11-20T18:00:00.000Z" };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(wallet));
+
+    const { unmount } = render(<WalletConnectPanel pollIntervalMs={5} />);
+    expect(await screen.findByText(ADDRESS)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Send a test transaction" })).not.toBeInTheDocument();
+    unmount();
+
+    render(<WalletConnectPanel pollIntervalMs={5} testTransactions />);
+    expect(await screen.findByRole("button", { name: "Send a test transaction" })).toBeVisible();
+  });
+
   it("explains how to recover when the wallet signed on the wrong network", async () => {
     mockApi({
       poll: [signRequest("SIGNED", { account: ADDRESS, walletNetwork: "MAINNET", networkMatches: false })],
