@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Badge } from "@/components/ui/badge";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getDb } from "@/lib/db/client";
+import { safeExternalUrl } from "@/contracts";
 import { getPublishedEvent } from "@/features/events/event-store";
 import {
   formatEventDate,
@@ -36,6 +37,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   if (!event) notFound();
 
   const fromPrice = lowestPriceDrops(event.tiers);
+  const artworkUrl = safeExternalUrl(event.artworkUrl);
 
   return (
     <>
@@ -47,10 +49,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <span>{event.title}</span>
       </nav>
 
-      {event.artworkUrl ? (
+      {artworkUrl ? (
         <div className="mb-6 aspect-[16/9] w-full overflow-hidden rounded-card bg-surface">
           {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host */}
-          <img src={event.artworkUrl} alt="" className="size-full object-cover" />
+          <img src={artworkUrl} alt="" className="size-full object-cover" />
         </div>
       ) : null}
 
