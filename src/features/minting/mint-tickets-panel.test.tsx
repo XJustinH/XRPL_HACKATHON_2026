@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,21 +8,23 @@ import { MintTicketsPanel } from "./mint-tickets-panel";
 
 const EVENT = "3b241101-e2bb-4255-8caf-4136c566a962";
 const TIER = "9c8e3a43-6c1f-4d2b-8f0e-2b6f8d8f6c11";
-const TICKET = "6f1d3c2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f";
-const REQUEST = "515b9d76-f7cc-4f3b-979e-a82500340424";
 const ISSUER = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
 const NFT = "00080000A1B2C3D4E5F60718293A4B5C6D7E8F9012345678ABCDEF0100000007";
 const TX = "E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879";
 
-function ticket(extra: Partial<MintTicketView> = {}): MintTicketView {
+/** Deterministic UUIDs: ticket n and request n. */
+const ticketId = (n: number) => `6f1d3c2e-8a4b-4c5d-9e6f-${String(n).padStart(12, "0")}`;
+const requestId = (n: number) => `515b9d76-f7cc-4f3b-979e-${String(n).padStart(12, "0")}`;
+
+function ticket(serial: number, extra: Partial<MintTicketView> = {}): MintTicketView {
   return {
-    id: TICKET,
+    id: ticketId(serial),
     eventId: EVENT,
     tierId: TIER,
-    serial: 1,
+    serial,
     nftokenId: null,
     issuerAddress: ISSUER,
-    metadataUri: `http://localhost:3000/api/tickets/${TICKET}/metadata`,
+    metadataUri: `http://localhost:3000/api/tickets/${ticketId(serial)}/metadata`,
     mintStatus: "PENDING",
     mintTxHash: null,
     mintedAt: null,
@@ -33,6 +35,16 @@ function ticket(extra: Partial<MintTicketView> = {}): MintTicketView {
     ...extra,
   };
 }
+
+const minted = (serial: number) =>
+  ticket(serial, {
+    mintStatus: "MINTED",
+    nftokenId: NFT,
+    mintTxHash: TX,
+    mintedAt: "2026-11-20T19:00:00.000Z",
+    nftExplorerUrl: `https://testnet.xrpl.org/nft/${NFT}`,
+    mintTxExplorerUrl: `https://testnet.xrpl.org/transactions/${TX}`,
+  });
 
 function eventMints(tickets: MintTicketView[], mintedQuantity = 0, totalSupply = 50): EventMints {
   return {
@@ -54,44 +66,25 @@ function eventMints(tickets: MintTicketView[], mintedQuantity = 0, totalSupply =
   };
 }
 
-function txRequest(
-  status: TransactionRequest["status"],
-  extra: Partial<TransactionRequest> = {},
-): TransactionRequest {
+function txRequest(n: number, status: TransactionRequest["status"]): TransactionRequest {
   return {
-    id: REQUEST,
+    id: requestId(n),
     purpose: "MINT_TICKET",
-    reference: TICKET,
+    reference: ticketId(n),
     status,
     transactionType: "NFTokenMint",
     account: ISSUER,
-    instruction: "Mint ticket #1",
-    signUrl: `https://xumm.app/sign/${REQUEST}`,
-    qrPngUrl: `https://xumm.app/sign/${REQUEST}_q.png`,
+    instruction: `Mint ticket #${n}`,
+    signUrl: `https://xumm.app/sign/${requestId(n)}`,
+    qrPngUrl: `https://xumm.app/sign/${requestId(n)}_q.png`,
     expiresAt: null,
-    txHash: null,
-    engineResult: null,
+    txHash: status === "CONFIRMED" ? TX : null,
+    engineResult: status === "CONFIRMED" ? "tesSUCCESS" : null,
     ledgerIndex: null,
-    explorerUrl: null,
+    explorerUrl: status === "CONFIRMED" ? `https://testnet.xrpl.org/transactions/${TX}` : null,
     failureReason: null,
-    ...extra,
   };
 }
-
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(status < 400 ? { data } : data), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-
-const MINTED = ticket({
-  mintStatus: "MINTED",
-  nftokenId: NFT,
-  mintTxHash: TX,
-  mintedAt: "2026-11-20T19:00:00.000Z",
-  nftExplorerUrl: `https://testnet.xrpl.org/nft/${NFT}`,
-  mintTxExplorerUrl: `https://testnet.xrpl.org/transactions/${TX}`,
-});
 
 function report(extra: Partial<MintMappingReport> = {}): MintMappingReport {
   return {
@@ -107,35 +100,60 @@ function report(extra: Partial<MintMappingReport> = {}): MintMappingReport {
   };
 }
 
-/** Fake API. `listings` are returned by successive GETs (the last repeats). */
+const json = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(status < 400 ? { data } : data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+/**
+ * Fake API. Each mint POST reserves ticket n and returns request n (both 1-based); the status
+ * of request n is `status[n]` (CONFIRMED unless a test sets it). `listings` are returned by
+ * successive GETs of the event's mints (the last repeats).
+ */
 function mockApi({
   listings,
-  mint = () => json({ ticket: ticket(), request: txRequest("PENDING"), metadataPublic: false }, 201),
-  statuses = [
-    txRequest("CONFIRMED", { txHash: TX, explorerUrl: `https://testnet.xrpl.org/transactions/${TX}` }),
-  ],
+  mint,
+  status = {},
   reconcile = () => json(report()),
 }: {
   listings: EventMints[];
-  mint?: () => Response | Promise<Response>;
-  statuses?: TransactionRequest[];
+  mint?: (n: number) => Response;
+  status?: Record<number, TransactionRequest["status"]>;
   reconcile?: () => Response;
 }) {
   const lists = [...listings];
-  const polls = [...statuses];
+  let posts = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     if (url === `/api/events/${EVENT}/mints/reconcile` && method === "POST") return reconcile();
-    if (url === `/api/events/${EVENT}/mints` && method === "POST") return mint();
+    if (url === `/api/events/${EVENT}/mints` && method === "POST") {
+      posts += 1;
+      if (mint) return mint(posts);
+      return json(
+        { ticket: ticket(posts), request: txRequest(posts, "PENDING"), metadataPublic: false },
+        201,
+      );
+    }
     if (url === `/api/events/${EVENT}/mints`) return json(lists.length > 1 ? lists.shift() : lists[0]);
-    if (url.startsWith("/api/wallet/transaction-requests/"))
-      return json(polls.length > 1 ? polls.shift() : polls[0]);
+    const polled = /^\/api\/wallet\/transaction-requests\/.+-(\d{12})$/.exec(url);
+    if (polled) {
+      const n = Number(polled[1]);
+      return json(txRequest(n, status[n] ?? "CONFIRMED"));
+    }
     throw new Error(`unexpected ${method} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+const mintPosts = (fetchMock: ReturnType<typeof mockApi>) =>
+  fetchMock.mock.calls.filter(
+    ([url, init]) => String(url) === `/api/events/${EVENT}/mints` && init?.method === "POST",
+  );
+const idempotencyKeys = (fetchMock: ReturnType<typeof mockApi>) =>
+  mintPosts(fetchMock).map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
 
 describe("MintTicketsPanel", () => {
   afterEach(() => {
@@ -144,7 +162,7 @@ describe("MintTicketsPanel", () => {
 
   it("mints the next ticket with the proven wallet and shows it once validated", async () => {
     const fetchMock = mockApi({
-      listings: [eventMints([]), eventMints([ticket()]), eventMints([MINTED], 1)],
+      listings: [eventMints([]), eventMints([ticket(1)]), eventMints([minted(1)], 1)],
     });
     render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
 
@@ -152,23 +170,120 @@ describe("MintTicketsPanel", () => {
     expect(screen.getByText(ISSUER)).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Mint next ticket" }));
 
-    expect(
-      await screen.findByRole("region", { name: "Approve the mint: General Admission #1" }),
-    ).toBeVisible();
-    expect(screen.getByText(/not on a public address/)).toBeVisible();
-    expect(await screen.findByText("Confirmed on XRPL Testnet.")).toBeVisible();
+    expect(await screen.findByText(/not on a public address/)).toBeVisible();
+    expect(await screen.findByText("Minted 1 ticket of General Admission on XRPL Testnet.")).toBeVisible();
 
-    const tickets = await screen.findByRole("list", { name: "General Admission tickets" });
-    expect(await within(tickets).findByText("Minted")).toBeVisible();
+    const tickets = await screen.findByRole("list", { name: "General Admission: minted tickets" });
     expect(within(tickets).getByRole("link", { name: /NFT/ })).toHaveAttribute(
       "href",
       `https://testnet.xrpl.org/nft/${NFT}`,
     );
     expect(screen.getByText("2.5 XRP · Minted 1 of 50")).toBeVisible();
 
-    const [, init] = fetchMock.mock.calls.find(([, i]) => i?.method === "POST")!;
+    const [, init] = mintPosts(fetchMock)[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({ tierId: TIER });
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f]{32}$/);
+    expect(idempotencyKeys(fetchMock)).toEqual([expect.stringMatching(/^[0-9a-f]{32}-0$/)]);
+  });
+
+  it("mints a tier's remaining quantity one approval at a time, with progress (XRPL-025)", async () => {
+    const fetchMock = mockApi({ listings: [eventMints([], 0, 3)] });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
+
+    const progress = await screen.findByRole("region", { name: "Minting progress" });
+    expect(
+      await within(progress).findByText("Minted 3 tickets of General Admission on XRPL Testnet."),
+    ).toBeVisible();
+    expect(within(progress).getByText("3 of 3 minted")).toBeVisible();
+
+    // One request per ticket, all under one run key: retrying step n replays it instead of duplicating.
+    const keys = idempotencyKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    const run = keys[0]!.slice(0, 32);
+    expect(keys).toEqual([`${run}-0`, `${run}-1`, `${run}-2`]);
+  });
+
+  it("stops the run at the first ticket that is not confirmed", async () => {
+    const fetchMock = mockApi({ listings: [eventMints([], 0, 3)], status: { 2: "REJECTED" } });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
+
+    expect(
+      await screen.findByText("You declined the last ticket in Xaman, so minting stopped."),
+    ).toBeVisible();
+    expect(screen.getByText("1 of 3 minted")).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 30)); // a few more poll intervals
+    expect(mintPosts(fetchMock)).toHaveLength(2);
+  });
+
+  it("can stop after the ticket being approved", async () => {
+    const status: Record<number, TransactionRequest["status"]> = { 1: "PENDING" };
+    const fetchMock = mockApi({ listings: [eventMints([], 0, 3)], status });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Stop after this ticket" }));
+    expect(screen.getByRole("button", { name: "Stopping after this ticket" })).toBeDisabled();
+    status[1] = "CONFIRMED";
+
+    expect(await screen.findByText("Stopped after 1 of 3, as asked.")).toBeVisible();
+    expect(mintPosts(fetchMock)).toHaveLength(1);
+  });
+
+  it("retries a step with the same Idempotency-Key when no response arrived", async () => {
+    const fetchMock = mockApi({
+      listings: [eventMints([], 0, 2)],
+      mint: (n) => {
+        if (n === 1) throw new TypeError("Failed to fetch");
+        return json({ ticket: ticket(1), request: txRequest(1, "PENDING"), metadataPublic: true }, 201);
+      },
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server");
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Minted 1 ticket of General Admission on XRPL Testnet.")).toBeVisible();
+    const keys = idempotencyKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("shows the server's reason when a mint cannot start", async () => {
+    mockApi({
+      listings: [eventMints([])],
+      mint: () =>
+        json(
+          { error: { code: "NOT_EVENT_OWNER", message: "Only this event's organiser can do this." } },
+          403,
+        ),
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Only this event's organiser can do this.");
+  });
+
+  it("shows minted, pending and failed tickets separately", async () => {
+    mockApi({
+      listings: [
+        eventMints(
+          [minted(1), ticket(2), ticket(3, { mintStatus: "SUBMITTED" }), ticket(4, { mintStatus: "FAILED" })],
+          1,
+          10,
+        ),
+      ],
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+
+    expect(await screen.findByText("1 minted · 2 pending · 1 failed")).toBeVisible();
+    const mintedList = screen.getByRole("list", { name: "General Admission: minted tickets" });
+    expect(within(mintedList).getByText("#1")).toBeVisible();
+    const pendingList = screen.getByRole("list", { name: "General Admission: pending tickets" });
+    expect(within(pendingList).getAllByRole("listitem")).toHaveLength(2);
+    const failedList = screen.getByRole("list", { name: "General Admission: failed tickets" });
+    expect(within(failedList).getByText("#4")).toBeVisible();
+    // Failed tickets get reused, so they still count as left to mint: 10 - 1 minted - 2 pending.
+    expect(screen.getByRole("button", { name: "Mint all 7 remaining" })).toBeEnabled();
   });
 
   it("asks for a proven wallet before minting", async () => {
@@ -177,45 +292,19 @@ describe("MintTicketsPanel", () => {
 
     expect(await screen.findByRole("link", { name: "Connect wallet" })).toHaveAttribute("href", "/connect");
     expect(await screen.findByRole("button", { name: "Mint next ticket" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mint all 50 remaining" })).toBeDisabled();
   });
 
   it("does not offer more tickets than the tier holds", async () => {
-    mockApi({ listings: [eventMints([MINTED], 1, 1)] });
+    mockApi({ listings: [eventMints([minted(1)], 1, 1)] });
     render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
     expect(await screen.findByRole("button", { name: "All tickets minted" })).toBeDisabled();
   });
 
-  it("shows the server's reason when a mint cannot start", async () => {
-    mockApi({
-      listings: [eventMints([])],
-      mint: () => json({ error: { code: "FORBIDDEN", message: "Only the event's seller can mint" } }, 403),
-    });
+  it("waits for pending mints instead of reserving past the supply", async () => {
+    mockApi({ listings: [eventMints([minted(1), ticket(2)], 1, 2)] });
     render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Only the event's seller can mint");
-  });
-
-  it("retries with the same Idempotency-Key when no response arrived", async () => {
-    let attempts = 0;
-    const fetchMock = mockApi({
-      listings: [eventMints([])],
-      mint: () => {
-        attempts += 1;
-        if (attempts === 1) throw new TypeError("Failed to fetch");
-        return json({ ticket: ticket(), request: txRequest("PENDING"), metadataPublic: true }, 201);
-      },
-    });
-    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server");
-    await userEvent.click(screen.getByRole("button", { name: "Mint next ticket" }));
-    await screen.findByRole("region", { name: "Approve the mint: General Admission #1" });
-
-    const keys = fetchMock.mock.calls
-      .filter(([, i]) => i?.method === "POST")
-      .map(([, i]) => new Headers(i?.headers).get("Idempotency-Key"));
-    expect(keys).toHaveLength(2);
-    expect(keys[0]).toBe(keys[1]);
+    expect(await screen.findByRole("button", { name: "Waiting on pending mints" })).toBeDisabled();
   });
 
   it("explains when the event has no tiers yet", async () => {
@@ -230,15 +319,17 @@ describe("MintTicketsPanel", () => {
     await screen.findByText("2.5 XRP · Minted 0 of 50");
     rerender(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} tiersVersion="b" />);
     expect(await screen.findByText("2.5 XRP · Minted 0 of 80")).toBeVisible();
-    expect(fetchMock.mock.calls.filter(([url]) => String(url) === `/api/events/${EVENT}/mints`)).toHaveLength(
-      2,
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url) === `/api/events/${EVENT}/mints`),
+      ).toHaveLength(2),
     );
   });
 
   it("checks the event against the ledger and reloads after recording a missed mint", async () => {
     const fetchMock = mockApi({
-      listings: [eventMints([ticket()]), eventMints([MINTED], 1)],
-      reconcile: () => json(report({ recorded: [TICKET] })),
+      listings: [eventMints([ticket(1)]), eventMints([minted(1)], 1)],
+      reconcile: () => json(report({ recorded: [ticketId(1)] })),
     });
     render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
     await userEvent.click(await screen.findByRole("button", { name: "Check against the ledger" }));
@@ -255,7 +346,7 @@ describe("MintTicketsPanel", () => {
 
   it("lists problems the ledger check found", async () => {
     mockApi({
-      listings: [eventMints([MINTED], 1)],
+      listings: [eventMints([minted(1)], 1)],
       reconcile: () =>
         json(
           report({
@@ -264,7 +355,7 @@ describe("MintTicketsPanel", () => {
             issues: [
               {
                 problem: "MINT_TX_MISMATCH",
-                ticketId: TICKET,
+                ticketId: ticketId(1),
                 serial: 1,
                 nftokenId: NFT,
                 txHash: TX,

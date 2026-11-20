@@ -133,13 +133,45 @@ recorded by the reconciler from the validated ledger:
 
 Limitations:
 
-- One ticket per approval. Minting a tier's whole quantity is XRPL-025 (needs XRPL-016 from Agent C).
-  Retrying failed mints and background reconciliation are XRPL-027 and XRPL-026.
+- One ticket per approval: the seller signs each NFTokenMint. A tier's whole quantity is minted as a run
+  of approvals (XRPL-025, below). Retrying failed mints is XRPL-027.
 - An unapproved request holds its serial until the Xaman request expires (10 minutes). The next read
   then releases it.
 - A demo persona must prove its wallet again in each session (Agent A's rule for shared demo accounts).
 - Locally the metadata URI is `localhost`, so Xaman and the explorer cannot show the ticket's details
   (the panel warns when `metadataPublic` is false). The mint itself is valid.
+
+## Minting a tier's quantity (XRPL-025)
+
+Each ticket is still its own seller-approved `NFTokenMint`: the app holds no key, so it cannot mint on
+the seller's behalf. **Mint all N remaining** on a tier runs those approvals one after another:
+
+- **Progress.** The panel shows "k of N minted", the approval for the current ticket, and moves to the
+  next ticket as soon as the ledger validates the current one. Each tier lists its minted, pending
+  (awaiting approval or validation) and failed tickets separately, with counts.
+- **Bounded.** A run never asks for more than the tier's remaining quantity (configured supply minus
+  minted and pending tickets), and the server refuses any reservation beyond supply. Reservations for a
+  tier are serialised (the tier row is locked while a ticket is reserved), so concurrent requests, two
+  tabs or a double click cannot reserve past the supply or take the same failed ticket twice.
+- **Retry-safe.** Step `n` of a run sends `Idempotency-Key: <run key>-<n>`. If a step's answer is lost,
+  **Try again** resends the same key and gets the same ticket and request back instead of a second one.
+- **Stops on trouble.** The run stops at the first ticket that is declined, expires, is cancelled or
+  fails on the ledger, and says why. **Stop after this ticket** ends it after the current approval.
+  Starting again later continues towards the configured quantity; failed tickets are reused.
+
+Verified on XRPL Testnet (20 Nov 2026): two tickets of one tier minted in sequence through the same server
+path, each signed by a dev seller wallet and recorded from the validated ledger
+([`49A9C88E…76DC2A96`](https://testnet.xrpl.org/transactions/49A9C88EB25AE8FE4D4A59850CEC5AD8EA4837D148C0C6DF437F699576DC2A96),
+[`BB164BAB…0FEC871C`](https://testnet.xrpl.org/transactions/BB164BAB9033F692D722C4AB779FDE62B4E8D7017CF90EBBE66A47CC0FEC871C));
+the tier went from 1 to 3 of 10 minted and the ledger check verified all three.
+
+Limitations:
+
+- One approval per ticket. On a phone, each step's **Open in Xaman** opens the next request; on a
+  computer, each step shows a new QR code. Pushing follow-up requests straight to the seller's Xaman app
+  (Xaman user tokens) is a possible follow-up.
+- A run lives in the open page. Leaving the page stops it after the current request; the tickets and
+  their statuses are kept, and **Mint all N remaining** picks up where it left off.
 
 ## Mapping NFTs to tickets (XRPL-026)
 

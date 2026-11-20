@@ -76,6 +76,41 @@ describe("createPendingTicket", () => {
     expect(retried).toMatchObject({ id: failed.id, serial: 1, mintStatus: "PENDING" });
   });
 
+  it("never reserves beyond supply under concurrent requests (XRPL-025)", async () => {
+    const { event, tier } = await seedEvent(3);
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => reserve(event.id, tier.id)));
+
+    const reserved = results.filter((r) => r.status === "fulfilled");
+    expect(reserved).toHaveLength(3);
+    for (const failure of results.filter((r) => r.status === "rejected")) {
+      expect((failure as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+    }
+    const serials = (await db.ticketNFT.findMany({ where: { tierId: tier.id }, select: { serial: true } }))
+      .map((t) => t.serial)
+      .sort();
+    expect(serials).toEqual([1, 2, 3]);
+  });
+
+  it("gives each failed ticket to only one of many concurrent requests", async () => {
+    const { event, tier } = await seedEvent(3);
+    const kept = await reserve(event.id, tier.id);
+    const failedA = await reserve(event.id, tier.id);
+    const failedB = await reserve(event.id, tier.id);
+    await db.ticketNFT.updateMany({
+      where: { id: { in: [failedA.id, failedB.id] } },
+      data: { mintStatus: "FAILED" },
+    });
+
+    const results = await Promise.allSettled(Array.from({ length: 10 }, () => reserve(event.id, tier.id)));
+    const taken = results.flatMap((r) => (r.status === "fulfilled" ? [r.value.id] : []));
+    expect(taken.sort()).toEqual([failedA.id, failedB.id].sort()); // each reused exactly once
+    for (const failure of results.filter((r) => r.status === "rejected")) {
+      expect((failure as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+    }
+    expect(await db.ticketNFT.count({ where: { tierId: tier.id } })).toBe(3);
+    expect((await db.ticketNFT.findUniqueOrThrow({ where: { id: kept.id } })).mintStatus).toBe("PENDING");
+  });
+
   it("rejects a tier that belongs to another event", async () => {
     const one = await seedEvent();
     const other = await seedEvent();

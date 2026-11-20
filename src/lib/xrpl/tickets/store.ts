@@ -24,16 +24,19 @@ export interface CreatePendingTicketInput {
  * whose earlier mint failed is reused first (it never produced an NFT), so serials stay
  * compact. Tickets that are PENDING, SUBMITTED or MINTED count against the tier's supply.
  *
- * 404 if the tier is not part of the event; 409 when the tier is fully allocated. Two
- * concurrent reservations cannot share a serial: the (tierId, serial) unique index rejects
- * the second, which surfaces as 409 so the caller can retry.
+ * 404 if the tier is not part of the event; 409 when the tier is fully allocated.
+ *
+ * Reservations for a tier run one at a time (the tier row is locked for the transaction),
+ * so concurrent requests can never take the same failed ticket twice or reserve beyond
+ * the tier's supply (XRPL-025). The (tierId, serial) unique index is a second guard.
  */
 export async function createPendingTicket(db: PrismaClient, input: CreatePendingTicketInput) {
   return db.$transaction(async (tx) => {
-    const tier = await tx.ticketTier.findFirst({
-      where: { id: input.tierId, eventId: input.eventId },
-      select: { id: true, totalSupply: true },
-    });
+    const locked = await tx.$queryRaw<Array<{ id: string; totalSupply: number }>>`
+      SELECT "id", "totalSupply" FROM "TicketTier"
+      WHERE "id" = ${input.tierId}::uuid AND "eventId" = ${input.eventId}::uuid
+      FOR UPDATE`;
+    const tier = locked[0];
     if (!tier) throw errors.notFound("Ticket tier not found for this event");
 
     const failed = await tx.ticketNFT.findFirst({
