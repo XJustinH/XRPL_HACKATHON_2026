@@ -14,3 +14,4 @@ export * from "./wallet/sign-requests";
 export * from "./wallet/readiness";
 export * from "./wallet/transaction-requests";
 export * from "./wallet/test-transactions";
+export * from "./tickets/metadata";

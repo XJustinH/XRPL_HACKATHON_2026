@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { Drops, IsoDateTime, NFTokenId, OfferIndex, pageOf, TxHash, XrplAddress } from "./common";
+import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, pageOf, TxHash, XrplAddress } from "./common";
 import { XrplNetwork } from "./entities";
 
 /**
@@ -355,3 +355,47 @@ export const CreateTestTransactionBody = z.object({
   account: XrplAddress,
 });
 export type CreateTestTransactionBody = z.infer<typeof CreateTestTransactionBody>;
+
+// ---------------------------------------------------------------------------
+// Ticket NFT metadata and identity (XRPL-022)
+// ---------------------------------------------------------------------------
+
+/** Version marker inside ticket metadata JSON. Bump when the shape changes. */
+export const TICKET_METADATA_SCHEMA = "xrpl-ticketing/ticket@1";
+
+/**
+ * Public metadata for a ticket NFT, served at the URI written into the NFT at mint
+ * (XRPL-023). Follows the XLS-24 layout (name, description, image, collection, attributes)
+ * so wallets and explorers can display it, plus a `ticket` block that ties the NFT to
+ * exactly one ticket record. It never contains attendee information: buyers and holders
+ * are not named, and ownership is only ever read from the ledger.
+ */
+export const TicketNftMetadata = z.object({
+  schema: z.literal(TICKET_METADATA_SCHEMA),
+  nftType: z.literal("ticket.v1"),
+  name: z.string().min(1),
+  description: z.string(),
+  image: z.url(),
+  collection: z.object({ name: z.string(), family: z.string() }),
+  attributes: z.array(z.object({ trait_type: z.string(), value: z.union([z.string(), z.number()]) })),
+  ticket: z.object({
+    /** App ticket record (TicketNFT.id). One NFT per ticket record, one record per NFT. */
+    ticketId: AppId,
+    eventId: AppId,
+    tierId: AppId,
+    /** 1-based serial within the tier. */
+    serial: z.number().int().positive(),
+    /** Seller account that mints (issues) the NFT. */
+    issuer: XrplAddress,
+    network: XrplNetwork,
+  }),
+  event: z.object({
+    title: z.string(),
+    startsAt: IsoDateTime,
+    endsAt: IsoDateTime.nullable(),
+    venue: z.string(),
+    city: z.string(),
+  }),
+  tier: z.object({ name: z.string(), priceDrops: Drops }),
+});
+export type TicketNftMetadata = z.infer<typeof TicketNftMetadata>;
