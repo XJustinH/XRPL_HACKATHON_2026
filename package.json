@@ -17,7 +17,9 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx scripts/seed/run.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "xrpl:check-network": "tsx src/lib/xrpl/tools/check-network.ts",
+    "xrpl:dev-wallet": "tsx src/lib/xrpl/tools/create-dev-wallet.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
@@ -26,6 +28,7 @@
     "pg": "^8.23.1",
     "react": "19.1.1",
     "react-dom": "19.1.1",
+    "xrpl": "^5.3.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

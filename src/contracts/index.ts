@@ -21,3 +21,4 @@ export * from "./common";
 export * from "./entities";
 export * from "./auth";
 export * from "./events";
+export * from "./xrpl";
