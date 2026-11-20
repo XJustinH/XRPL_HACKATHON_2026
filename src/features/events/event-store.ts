@@ -139,8 +139,51 @@ function decodeEventCursor(cursor: string): { startsAt: Date; id: string } | nul
   }
 }
 
+export type EventListOptions = {
+  now?: Date;
+  limit?: number;
+  cursor?: string;
+  /** Free text matched against the title and description. */
+  q?: string;
+  city?: string;
+  venue?: string;
+  /** Narrows the start-time window; never widens it into the past. */
+  from?: string;
+  to?: string;
+  sellerId?: string;
+};
+
 /**
- * Published, not-yet-started events, soonest first (XRPL-018).
+ * Translates search filters into a Prisma `where` fragment.
+ *
+ * `from` can only ever move the lower bound later than "now", so a crafted
+ * value cannot surface events that have already started. Text matching is
+ * case-insensitive, which is the point of a search box.
+ */
+function buildEventFilters(options: EventListOptions, now: Date): Prisma.EventWhereInput {
+  const where: Prisma.EventWhereInput = {};
+
+  if (options.q) {
+    where.OR = [
+      { title: { contains: options.q, mode: "insensitive" } },
+      { description: { contains: options.q, mode: "insensitive" } },
+    ];
+  }
+  if (options.city) where.city = { equals: options.city, mode: "insensitive" };
+  if (options.venue) where.venue = { contains: options.venue, mode: "insensitive" };
+  if (options.sellerId) where.sellerId = options.sellerId;
+
+  const from = options.from ? new Date(options.from) : null;
+  const to = options.to ? new Date(options.to) : null;
+  const lower = from && !Number.isNaN(from.getTime()) && from > now ? from : now;
+  const upper = to && !Number.isNaN(to.getTime()) ? to : null;
+  where.startsAt = upper ? { gt: lower, lte: upper } : { gt: lower };
+
+  return where;
+}
+
+/**
+ * Published, not-yet-started events, soonest first (XRPL-018, filters XRPL-059).
  *
  * Status and start time are filtered in the query rather than after loading, so
  * a draft or a finished event cannot reach a public response by accident.
@@ -151,7 +194,7 @@ function decodeEventCursor(cursor: string): { startsAt: Date; id: string } | nul
  */
 export async function listPublishedEvents(
   db: EventDb,
-  options: { now?: Date; limit?: number; cursor?: string } = {},
+  options: EventListOptions = {},
 ): Promise<Page<EventView>> {
   const now = options.now ?? new Date();
   const limit = Math.min(Math.max(options.limit ?? 12, 1), 50);
@@ -169,7 +212,12 @@ export async function listPublishedEvents(
     : {};
 
   const rows = await db.event.findMany({
-    where: { status: "PUBLISHED", startsAt: { gt: now }, ...keyset },
+    where: {
+      status: "PUBLISHED",
+      startsAt: { gt: now },
+      ...buildEventFilters(options, now),
+      ...keyset,
+    },
     orderBy: [{ startsAt: "asc" }, { id: "asc" }],
     // One extra row reveals whether another page exists without a second count.
     take: limit + 1,

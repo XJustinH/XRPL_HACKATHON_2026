@@ -33,7 +33,9 @@ describe("primitives are reused, not redefined", () => {
   it("rejects a drops value above total XRP supply exactly as common.ts does", () => {
     const overSupply = "100000000000000001";
     expect(Drops.safeParse(overSupply).success).toBe(false);
-    expect(EventQuery.safeParse({ maxPriceDrops: overSupply }).success).toBe(false);
+    expect(
+      TicketTierInput.safeParse({ name: "GA", priceDrops: overSupply, totalSupply: 1 }).success,
+    ).toBe(false);
   });
 
   it("uses the shared address rule, so ambiguous base58 characters fail", () => {
@@ -106,16 +108,45 @@ describe("TicketTierInput", () => {
 });
 
 describe("EventQuery", () => {
-  it("defaults sort and limit so a bare request is valid", () => {
-    const parsed = EventQuery.parse({});
-    expect(parsed.sort).toBe("SOONEST");
-    expect(parsed.limit).toBe(12);
+  it("defaults the limit so a bare request is valid", () => {
+    expect(EventQuery.parse({}).limit).toBe(12);
   });
 
   it("coerces a string limit from the query string but enforces the cap", () => {
     expect(EventQuery.parse({ limit: "25" }).limit).toBe(25);
     expect(EventQuery.safeParse({ limit: "51" }).success).toBe(false);
     expect(EventQuery.safeParse({ limit: "0" }).success).toBe(false);
+  });
+
+  it("accepts the filters that are actually applied", () => {
+    const parsed = EventQuery.parse({
+      q: "market",
+      city: "Dublin",
+      venue: "Vicar Street",
+      from: "2026-12-01T00:00:00.000Z",
+      to: "2026-12-31T23:59:59.999Z",
+      sellerId: "3f1a8b0c-0000-4000-8000-000000000000",
+    });
+    expect(parsed.q).toBe("market");
+    expect(parsed.venue).toBe("Vicar Street");
+  });
+
+  it("omits filters that cannot be honoured yet, rather than ignoring them", () => {
+    // A filter that parses but does nothing looks like a working control.
+    // `category` needs an Event.category column; `maxPriceDrops` needs a
+    // numeric price column, since drops are stored as a decimal string.
+    const parsed = EventQuery.parse({});
+    expect(parsed).not.toHaveProperty("category");
+    expect(parsed).not.toHaveProperty("maxPriceDrops");
+    expect(parsed).not.toHaveProperty("sort");
+  });
+
+  it("rejects an organiser id that is not a UUID", () => {
+    expect(EventQuery.safeParse({ sellerId: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("requires an offset-bearing timestamp for the date bounds", () => {
+    expect(EventQuery.safeParse({ from: "2026-12-01" }).success).toBe(false);
   });
 });
 
