@@ -55,6 +55,8 @@ export const demoUsers = [
     role: "SELLER",
     displayName: `${DEMO_LABEL} The Testnet Tones`,
     settings: DEMO_USER_SETTINGS,
+    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
+    isDemo: true,
     onboardedAt: SEEDED_AT,
   },
   {
@@ -62,6 +64,8 @@ export const demoUsers = [
     role: "SELLER",
     displayName: `${DEMO_LABEL} The Ledger Rooms`,
     settings: DEMO_USER_SETTINGS,
+    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
+    isDemo: true,
     onboardedAt: SEEDED_AT,
   },
   {
@@ -69,6 +73,8 @@ export const demoUsers = [
     role: "ORGANISER",
     displayName: `${DEMO_LABEL} Door Team`,
     settings: DEMO_USER_SETTINGS,
+    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
+    isDemo: true,
     onboardedAt: SEEDED_AT,
   },
   {
@@ -76,6 +82,8 @@ export const demoUsers = [
     role: "CUSTOMER",
     displayName: `${DEMO_LABEL} Alex Fan`,
     settings: DEMO_USER_SETTINGS,
+    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
+    isDemo: true,
     onboardedAt: SEEDED_AT,
   },
   {
@@ -84,6 +92,8 @@ export const demoUsers = [
     role: "CUSTOMER",
     displayName: `${DEMO_LABEL} Sam Friend`,
     settings: DEMO_USER_SETTINGS,
+    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
+    isDemo: true,
     onboardedAt: SEEDED_AT,
   },
 ] as const satisfies readonly Prisma.UserCreateManyInput[];

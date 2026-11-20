@@ -35,6 +35,7 @@ describe("demo seed fixtures", () => {
     for (const u of demoUsers) {
       expect(u.displayName.startsWith(`${DEMO_LABEL} `), u.displayName).toBe(true);
       expect(u.settings).toEqual(DEMO_USER_SETTINGS);
+      expect(u.isDemo, u.displayName).toBe(true);
     }
     for (const e of demoEvents) {
       expect(e.title.startsWith(`${DEMO_LABEL} `), e.title).toBe(true);

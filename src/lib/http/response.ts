@@ -88,16 +88,58 @@ function isPrismaKnownError(err: unknown): err is { code: string; name: string }
 
 export type HandlerMeta = { requestId: string };
 
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function configuredAppOrigin(): string | null {
+  try {
+    return process.env.APP_BASE_URL ? new URL(process.env.APP_BASE_URL).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CSRF defence for cookie-authenticated mutations: reject state-changing requests
+ * that a browser marks as cross-site, or whose `Origin` is not this app.
+ * Requests without an `Origin` header (server-to-server callers such as wallet
+ * provider webhooks, curl) are not browser CSRF vectors and are allowed through.
+ */
+export function assertSameOrigin(req: Request): void {
+  if (!UNSAFE_METHODS.has(req.method.toUpperCase())) return;
+
+  if (req.headers.get("sec-fetch-site") === "cross-site") {
+    throw errors.forbidden("Cross-site request rejected");
+  }
+
+  const origin = req.headers.get("origin");
+  if (origin === null) return;
+  const allowed = new Set([new URL(req.url).origin, configuredAppOrigin()]);
+  if (!allowed.has(origin)) {
+    throw errors.forbidden("Cross-origin request rejected");
+  }
+}
+
+export type ApiHandlerOptions = {
+  /**
+   * Skip the same-origin check on POST/PUT/PATCH/DELETE. Only for endpoints that are
+   * deliberately callable cross-origin AND do not rely on the session cookie.
+   */
+  allowCrossOrigin?: boolean;
+};
+
 /**
  * Wrap a route handler so every failure is returned in the standard envelope.
  *   export const GET = withApiHandler(async (req, ctx, { requestId }) => jsonOk(data, { requestId }));
+ * State-changing methods are same-origin by default (see `assertSameOrigin`).
  */
 export function withApiHandler<Ctx = unknown>(
   handler: (req: Request, ctx: Ctx, meta: HandlerMeta) => Promise<Response>,
+  options: ApiHandlerOptions = {},
 ): (req: Request, ctx: Ctx) => Promise<Response> {
   return async (req, ctx) => {
     const requestId = getRequestId(req);
     try {
+      if (!options.allowCrossOrigin) assertSameOrigin(req);
       return await handler(req, ctx, { requestId });
     } catch (err) {
       const appErr = toAppError(err);

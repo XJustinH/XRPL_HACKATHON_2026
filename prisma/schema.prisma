@@ -103,14 +103,44 @@ model User {
   displayName String
   /// Non-sensitive preferences only (UI, opt-ins). Never secrets or tokens.
   settings    Json      @default("{}")
+  /// Role chosen and profile completed (XRPL-010). Null for a wallet-first account still choosing a role.
   onboardedAt DateTime? @db.Timestamptz(3)
+  /// Seeded demo persona (XRPL-008). Only these accounts can be assumed via demo login, and only when enabled.
+  isDemo      Boolean   @default(false)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
   wallets         WalletLink[]
+  sessions        Session[]
   events          Event[]         @relation("EventSeller")
   checkInsScanned CheckInRecord[] @relation("CheckInOrganiser")
   offersCreated   NFTOffer[]      @relation("OfferCreatedBy")
+
+  @@index([isDemo])
+}
+
+enum SessionMethod {
+  /// Created while choosing a role at /onboarding.
+  ONBOARDING
+  /// Assumed a seeded demo persona (demo login enabled only).
+  DEMO_PERSONA
+}
+
+/// Server-side session (XRPL-010). The browser cookie holds a random 256-bit token;
+/// only its SHA-256 hash is stored, so a database read does not yield usable cookies.
+model Session {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @db.Uuid
+  tokenHash String        @unique
+  method    SessionMethod
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  expiresAt DateTime      @db.Timestamptz(3)
+  revokedAt DateTime?     @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 /// A classic address linked to a user. A row with verifiedAt = null proves nothing:

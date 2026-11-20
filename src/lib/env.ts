@@ -10,6 +10,17 @@ import { z } from "zod";
 const blankAsUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
 const optionalString = z.preprocess(blankAsUndefined, z.string().optional());
 const optionalUrl = z.preprocess(blankAsUndefined, z.url().optional());
+const optionalBoolean = z.preprocess(
+  (v) => {
+    const s = blankAsUndefined(v);
+    if (typeof s !== "string") return s;
+    const lower = s.trim().toLowerCase();
+    if (lower === "true" || lower === "1") return true;
+    if (lower === "false" || lower === "0") return false;
+    return s; // rejected below with a clear message
+  },
+  z.boolean({ error: "Expected true/false/1/0" }).optional(),
+);
 
 export const serverEnvSchema = z
   .object({
@@ -23,6 +34,11 @@ export const serverEnvSchema = z
     XRPL_NETWORK: z.preprocess(blankAsUndefined, z.enum(["testnet", "devnet"]).default("testnet")),
     XRPL_WS_URL: optionalUrl,
     XRPL_RPC_URL: optionalUrl,
+    /**
+     * Allow signing in as seeded demo personas without a wallet (XRPL-010).
+     * Defaults to on outside production and off in production unless set to true.
+     */
+    DEMO_LOGIN_ENABLED: optionalBoolean,
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production" && (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32)) {
@@ -39,7 +55,11 @@ export const serverEnvSchema = z
         message: "SESSION_SECRET must be at least 32 characters",
       });
     }
-  });
+  })
+  .transform((env) => ({
+    ...env,
+    DEMO_LOGIN_ENABLED: env.DEMO_LOGIN_ENABLED ?? env.NODE_ENV !== "production",
+  }));
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 
