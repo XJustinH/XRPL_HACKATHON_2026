@@ -56,3 +56,24 @@ Served publicly at the ticket's URI. It follows the XLS-24 layout so wallets and
   names or user IDs. Who holds a ticket is a ledger fact, read live.
 - `priceDrops` is the tier's face value at mint, in drops, as an integer string.
 - `schema` is versioned. A future change bumps it, so readers can tell the shapes apart.
+
+## Publishing the metadata (XRPL-023)
+
+| Route | Returns |
+|---|---|
+| `GET /api/tickets/:id/metadata` | The ticket's `TicketNftMetadata` as **raw JSON**, not the `{ data }` envelope, because wallets and explorers read metadata at the top level. Public, `Access-Control-Allow-Origin: *`, 404 for unknown tickets |
+| `GET /api/tickets/:id/image` | Generated SVG ticket artwork. Used as `image` when the event has no https artwork. All text is XML-escaped, nothing external is loaded, and it is served with `Content-Security-Policy: default-src 'none'` |
+
+- **One URI per ticket:** `<base>/api/tickets/<ticketId>/metadata`. It is stored in `TicketNFT.metadataUri`
+  when the ticket is reserved (`createPendingTicket`, `src/lib/xrpl/tickets/store.ts`) and written into
+  the NFT at mint (XRPL-024).
+- **Base URL:** `TICKET_METADATA_BASE_URL`, falling back to `APP_BASE_URL`. **It must be the app's public
+  https address in any shared environment**; once a URI is on the ledger it cannot change. Locally it is
+  `http://localhost:3000`, which wallets and explorers cannot reach, and `isPubliclyReachable()` reports
+  that. Test mints made locally will not show an image in Xaman or on the explorer.
+- Reserving a ticket allocates the next serial in the tier. It reuses a ticket whose mint failed (it
+  never produced an NFT), and counts PENDING, SUBMITTED and MINTED tickets against the tier's supply
+  (409 when the tier is full).
+- **Limitation:** the JSON is rendered from the current event and tier records. If a seller edits an
+  event after minting, the served metadata follows the edit. Freezing it would need either a stored
+  snapshot (a schema request to Agent A) or content-addressed storage (IPFS/S3), as a follow-up.

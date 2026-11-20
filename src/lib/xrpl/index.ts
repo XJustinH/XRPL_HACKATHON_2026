@@ -15,3 +15,6 @@ export * from "./wallet/readiness";
 export * from "./wallet/transaction-requests";
 export * from "./wallet/test-transactions";
 export * from "./tickets/metadata";
+export * from "./tickets/urls";
+export * from "./tickets/image";
+export * from "./tickets/store";
