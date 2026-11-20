@@ -1,4 +1,4 @@
-import { convertHexToString, decodeAccountID } from "xrpl";
+import { convertHexToString } from "xrpl";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfirmedLedgerTx, TransactionRequest, TransactionRequestStatus } from "@/contracts/xrpl";
@@ -6,6 +6,7 @@ import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 
 import { getEventMints, reconcileTicketMint, requestTicketMint, type MintDeps } from "./minting";
+import { nftokenIdFor } from "./__tests__/nft-ids";
 import { ticketTaxon } from "./metadata";
 
 /** XRPL-024 minting against Postgres (`npm run test:db`), with Xaman and the ledger faked. */
@@ -14,14 +15,6 @@ const db = getDb();
 const ISSUER = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
 const REQUEST_ID = "515b9d76-f7cc-4f3b-979e-a82500340424";
 const TX_HASH = "E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879";
-
-/** A real-format NFTokenID for `issuer` with the given taxon (taxon scrambling as on the ledger). */
-function nftokenIdFor(issuer: string, taxon: number, sequence = 7): string {
-  const account = Buffer.from(decodeAccountID(issuer)).toString("hex");
-  const mask = Number((BigInt(384160001) * BigInt(sequence) + BigInt(2459)) % BigInt(4294967296));
-  const scrambled = ((taxon ^ mask) >>> 0).toString(16).padStart(8, "0");
-  return `00080000${account}${scrambled}${sequence.toString(16).padStart(8, "0")}`.toUpperCase();
-}
 
 beforeEach(async () => {
   await db.$executeRawUnsafe(

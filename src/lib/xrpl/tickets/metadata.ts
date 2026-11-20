@@ -20,6 +20,12 @@ export const TICKET_COLLECTION_FAMILY = "XRPL Ticketing";
 /** NFTokenMint allows at most 256 bytes of URI. */
 export const MAX_NFT_URI_BYTES = 256;
 
+/**
+ * Memo type on every ticket mint; the memo data is the ticket ID. Lets the app find its
+ * ticket mints in an issuer's ledger history and rebuild the NFT-to-ticket mapping (XRPL-026).
+ */
+export const TICKET_MEMO_TYPE = "xrpl-ticketing/ticket";
+
 const MAX_DESCRIPTION_LENGTH = 1000;
 
 /**

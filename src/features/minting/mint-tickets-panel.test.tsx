@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { EventMints, MintTicketView, TransactionRequest } from "@/contracts/xrpl";
+import type { EventMints, MintMappingReport, MintTicketView, TransactionRequest } from "@/contracts/xrpl";
 
 import { MintTicketsPanel } from "./mint-tickets-panel";
 
@@ -93,6 +93,20 @@ const MINTED = ticket({
   mintTxExplorerUrl: `https://testnet.xrpl.org/transactions/${TX}`,
 });
 
+function report(extra: Partial<MintMappingReport> = {}): MintMappingReport {
+  return {
+    eventId: EVENT,
+    issuers: [ISSUER],
+    mintsFound: 1,
+    recorded: [],
+    verified: 1,
+    issues: [],
+    complete: true,
+    checkedAt: "2026-11-20T21:00:00.000Z",
+    ...extra,
+  };
+}
+
 /** Fake API. `listings` are returned by successive GETs (the last repeats). */
 function mockApi({
   listings,
@@ -100,16 +114,19 @@ function mockApi({
   statuses = [
     txRequest("CONFIRMED", { txHash: TX, explorerUrl: `https://testnet.xrpl.org/transactions/${TX}` }),
   ],
+  reconcile = () => json(report()),
 }: {
   listings: EventMints[];
   mint?: () => Response | Promise<Response>;
   statuses?: TransactionRequest[];
+  reconcile?: () => Response;
 }) {
   const lists = [...listings];
   const polls = [...statuses];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    if (url === `/api/events/${EVENT}/mints/reconcile` && method === "POST") return reconcile();
     if (url === `/api/events/${EVENT}/mints` && method === "POST") return mint();
     if (url === `/api/events/${EVENT}/mints`) return json(lists.length > 1 ? lists.shift() : lists[0]);
     if (url.startsWith("/api/wallet/transaction-requests/"))
@@ -216,5 +233,52 @@ describe("MintTicketsPanel", () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === `/api/events/${EVENT}/mints`)).toHaveLength(
       2,
     );
+  });
+
+  it("checks the event against the ledger and reloads after recording a missed mint", async () => {
+    const fetchMock = mockApi({
+      listings: [eventMints([ticket()]), eventMints([MINTED], 1)],
+      reconcile: () => json(report({ recorded: [TICKET] })),
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Check against the ledger" }));
+
+    expect(
+      await screen.findByText("1 minted ticket matches the XRP Ledger. Recorded 1 mint found on the ledger."),
+    ).toBeVisible();
+    expect(await screen.findByText("2.5 XRP · Minted 1 of 50")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/events/${EVENT}/mints/reconcile`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("lists problems the ledger check found", async () => {
+    mockApi({
+      listings: [eventMints([MINTED], 1)],
+      reconcile: () =>
+        json(
+          report({
+            verified: 0,
+            complete: false,
+            issues: [
+              {
+                problem: "MINT_TX_MISMATCH",
+                ticketId: TICKET,
+                serial: 1,
+                nftokenId: NFT,
+                txHash: TX,
+                detail: "Transaction shows a different NFT",
+              },
+            ],
+          }),
+        ),
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Check against the ledger" }));
+
+    expect(await screen.findByText("1 problem found. Nothing was changed for it.")).toBeVisible();
+    expect(screen.getByText("#1: Transaction shows a different NFT")).toBeVisible();
+    expect(screen.getByText(/only its most recent transactions were read/)).toBeVisible();
   });
 });

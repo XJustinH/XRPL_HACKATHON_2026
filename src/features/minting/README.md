@@ -6,7 +6,7 @@ approved and recorded is in [docs/xrpl/ticket-nft.md](../../../docs/xrpl/ticket-
 
 | File | What |
 |---|---|
-| `mint-tickets-panel.tsx` | One event's tiers with "Mint next ticket", the Xaman approval, and each ticket's status with NFT and transaction explorer links |
+| `mint-tickets-panel.tsx` | One event's tiers with "Mint next ticket", the Xaman approval, each ticket's status with NFT and transaction explorer links, and **Check against the ledger** (XRPL-026), which shows the mapping report |
 
 Usage: Agent C's event page (`/seller/events/:id`, a server component) renders it for the event's owner.
 `issuerAddress` is the session's proven wallet (XRPL-012); when it is null the panel links to `/connect`

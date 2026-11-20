@@ -3,6 +3,7 @@ import { RippledError, TimeoutError, type Request } from "xrpl";
 import { describe, expect, it } from "vitest";
 
 import {
+  AccountMintsPage,
   AccountNftsPage,
   AccountSummary,
   ConfirmedLedgerTx,
@@ -196,6 +197,116 @@ describe("getAccountNfts", () => {
     // limit is clamped to rippled's minimum, and page 2 is read from the same ledger as page 1.
     expect(sent()[0]).toMatchObject({ limit: 20, ledger_index: "validated" });
     expect(sent()[1]).toMatchObject({ marker: "PAGE2", ledger_index: 900 });
+  });
+});
+
+describe("getAccountMints", () => {
+  const hex = (text: string) => Buffer.from(text, "utf8").toString("hex").toUpperCase();
+  const MINT_HASH = "FDA1B6E60466B33558E246E9C4EB697B39D62FB39C908E8CD2B0A13168847014";
+  const FAILED_HASH = "A".repeat(64);
+  const entry = (
+    tx: Record<string, unknown>,
+    meta: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    hash: MINT_HASH,
+    ledger_index: 900,
+    close_time_iso: "2026-11-20T20:12:20Z",
+    validated: true,
+    tx_json: tx,
+    meta,
+    ...extra,
+  });
+
+  it("returns validated mints issued by the account, with decoded URI and memos", async () => {
+    const { service, sent } = setup((req) =>
+      req.marker === undefined
+        ? {
+            result: {
+              account: ISSUER,
+              ledger_index_max: 950,
+              validated: true,
+              marker: "PAGE2",
+              transactions: [
+                entry(
+                  {
+                    TransactionType: "NFTokenMint",
+                    Account: ISSUER,
+                    NFTokenTaxon: 7,
+                    URI: URI_HEX,
+                    Memos: [{ Memo: { MemoType: hex("xrpl-ticketing/ticket"), MemoData: hex("ticket-1") } }],
+                  },
+                  { TransactionResult: "tesSUCCESS", nftoken_id: NFT_ID },
+                ),
+                // Not mints, someone else's mint, an unvalidated entry: all skipped.
+                entry(
+                  { TransactionType: "NFTokenAcceptOffer", Account: BUYER },
+                  { TransactionResult: "tesSUCCESS" },
+                ),
+                entry(
+                  { TransactionType: "NFTokenMint", Account: BUYER },
+                  { TransactionResult: "tesSUCCESS" },
+                ),
+                entry(
+                  { TransactionType: "NFTokenMint", Account: ISSUER },
+                  { TransactionResult: "tesSUCCESS" },
+                  {
+                    validated: false,
+                  },
+                ),
+              ],
+            },
+          }
+        : {
+            result: {
+              account: ISSUER,
+              ledger_index_max: 950,
+              validated: true,
+              transactions: [
+                entry(
+                  { TransactionType: "NFTokenMint", Account: ISSUER, NFTokenTaxon: 7 },
+                  { TransactionResult: "tecINSUFFICIENT_RESERVE" },
+                  { hash: FAILED_HASH.toLowerCase() },
+                ),
+              ],
+            },
+          },
+    );
+
+    const first = await service.getAccountMints(ISSUER, { limit: 5 });
+    AccountMintsPage.parse(first); // contract conformance
+    expect(first.scanned).toBe(4);
+    expect(first.items).toEqual([
+      {
+        hash: MINT_HASH,
+        ledgerIndex: 900,
+        closeTime: "2026-11-20T20:12:20Z",
+        account: ISSUER,
+        issuer: ISSUER,
+        engineResult: "tesSUCCESS",
+        succeeded: true,
+        nftokenId: NFT_ID,
+        taxon: 7,
+        uri: "ipfs://bafy-ticket-1",
+        memos: [{ type: "xrpl-ticketing/ticket", data: "ticket-1" }],
+        explorerUrl: `https://testnet.xrpl.org/transactions/${MINT_HASH}`,
+      },
+    ]);
+
+    const second = await service.getAccountMints(ISSUER, { cursor: first.nextCursor as string });
+    expect(second.nextCursor).toBeNull();
+    expect(second.items).toEqual([
+      expect.objectContaining({ hash: FAILED_HASH, succeeded: false, nftokenId: null, memos: [] }),
+    ]);
+    // Newest first over validated ledgers; page 2 stays inside page 1's ledger range.
+    expect(sent()[0]).toMatchObject({
+      command: "account_tx",
+      ledger_index_min: -1,
+      ledger_index_max: -1,
+      forward: false,
+      limit: 10,
+    });
+    expect(sent()[1]).toMatchObject({ marker: "PAGE2", ledger_index_max: 950 });
   });
 });
 

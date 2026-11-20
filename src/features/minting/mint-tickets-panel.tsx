@@ -6,8 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
 import type { MintStatus } from "@/contracts/entities";
-import type { EventMints, MintRequestResult, MintTicketView } from "@/contracts/xrpl";
-import { card, NETWORK_LABEL, notice, primaryButton } from "@/features/wallet/styles";
+import type { EventMints, MintMappingReport, MintRequestResult, MintTicketView } from "@/contracts/xrpl";
+import { card, NETWORK_LABEL, notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
 
@@ -240,6 +240,103 @@ function EventMintSection({
           ))}
         </ul>
       )}
+
+      <LedgerCheck eventId={eventId} onRecorded={refresh} />
+    </div>
+  );
+}
+
+type CheckState =
+  | { phase: "idle" }
+  | { phase: "checking" }
+  | { phase: "done"; report: MintMappingReport }
+  | { phase: "error"; message: string };
+
+/** XRPL-026: compare the event's tickets with the ledger and record mints the app missed. */
+function LedgerCheck({ eventId, onRecorded }: { eventId: string; onRecorded: () => void }) {
+  const [state, setState] = useState<CheckState>({ phase: "idle" });
+
+  const check = async () => {
+    setState({ phase: "checking" });
+    try {
+      const report = await callApi<MintMappingReport>(`/api/events/${eventId}/mints/reconcile`, {
+        method: "POST",
+      });
+      setState({ phase: "done", report });
+      if (report.recorded.length > 0) onRecorded();
+    } catch (error) {
+      setState({
+        phase: "error",
+        message: error instanceof Error ? error.message : "Could not check the ledger.",
+      });
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">
+          Compare every ticket with the XRP Ledger, and record any mint the app missed.
+        </p>
+        <button
+          type="button"
+          onClick={() => void check()}
+          disabled={state.phase === "checking"}
+          className={`${secondaryButton} w-full sm:w-auto`}
+        >
+          {state.phase === "checking" ? "Checking…" : "Check against the ledger"}
+        </button>
+      </div>
+      {state.phase === "error" ? (
+        <p role="alert" className={notice.critical}>
+          {state.message}
+        </p>
+      ) : null}
+      {state.phase === "done" ? <LedgerCheckResult report={state.report} /> : null}
+    </div>
+  );
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function LedgerCheckResult({ report }: { report: MintMappingReport }) {
+  const recorded = report.recorded.length;
+  const summary = [
+    report.verified === 0
+      ? "No minted tickets to compare yet."
+      : `${plural(report.verified, "minted ticket")} ${report.verified === 1 ? "matches" : "match"} the XRP Ledger.`,
+    recorded > 0 ? `Recorded ${plural(recorded, "mint")} found on the ledger.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div role="status" className="flex flex-col gap-2">
+      {report.issues.length === 0 ? (
+        <p className={notice.positive}>{summary}</p>
+      ) : (
+        <div className={notice.critical}>
+          <p className="font-semibold">
+            {plural(report.issues.length, "problem")} found. Nothing was changed for{" "}
+            {report.issues.length === 1 ? "it" : "them"}.
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {report.issues.map((issue, index) => (
+              <li key={`${issue.problem}-${issue.txHash ?? issue.ticketId ?? index}`} className="break-words">
+                {issue.serial ? `#${issue.serial}: ` : ""}
+                {issue.detail}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">{summary}</p>
+        </div>
+      )}
+      {!report.complete ? (
+        <p className={notice.caution}>
+          This wallet has a long history, so only its most recent transactions were read. Older mints were not
+          checked.
+        </p>
+      ) : null}
     </div>
   );
 }

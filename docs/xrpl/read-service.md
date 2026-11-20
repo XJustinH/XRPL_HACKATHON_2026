@@ -22,6 +22,7 @@ if (!check.owns) {
 | `getAccountInfo(address)` | `AccountSummary` (`exists: false` if never funded) | Wallet readiness before asking for a signature (011, 014, 030) |
 | `getAccountNfts(address, { cursor?, limit? })` | `AccountNftsPage` (`items`, `nextCursor`) | Wallet NFT lists (028, 033). rippled returns at least 20 per page |
 | `verifyOwner(nftokenId, address)` | `NftOwnershipCheck` | **"Does this wallet hold this ticket right now?"** Gate checks, pre-transfer checks (028, 036, 046) |
+| `getAccountMints(address, { cursor?, limit? })` | `AccountMintsPage` (`items`, `nextCursor`, `scanned`) | NFTs the account issued, newest first, from validated ledgers (`account_tx`): hash, result, NFTokenID, taxon, decoded URI and memos. Rebuilding ticket mappings (026). Covers the history the node keeps |
 | `getOwner(nftokenId)` | `NftOwnership` | Find the current owner when you do not know it, e.g. after an external transfer (028, 043). Needs Clio |
 | `getOffers(nftokenId)` | `LedgerNftOffers` (sell + buy) | Listings, stale-offer checks (029, 035, 038, 042) |
 | `getTransaction(hash)` | `LedgerTxLookup` (`VALIDATED` / `PENDING` / `NOT_FOUND`) | Showing progress after a wallet signs (014) |

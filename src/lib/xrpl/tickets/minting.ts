@@ -12,7 +12,7 @@ import type { XrplConfig } from "../config";
 import { explorerNftUrl, explorerTxUrl } from "../explorer";
 import type { XrplQueryService } from "../query";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
-import { encodeNftUri, ticketTaxon, TICKET_NFT_FLAGS } from "./metadata";
+import { encodeNftUri, ticketTaxon, TICKET_MEMO_TYPE, TICKET_NFT_FLAGS } from "./metadata";
 import { createPendingTicket } from "./store";
 import { isPubliclyReachable } from "./urls";
 
@@ -26,14 +26,12 @@ export interface MintDeps {
   db: PrismaClient;
   /** Lazy, so listing works even when Xaman is not configured. */
   transactions: () => Pick<WalletTransactionRequests, "create" | "get">;
-  ledger: () => Pick<XrplQueryService, "getValidatedTx" | "verifyOwner">;
+  ledger: () => Pick<XrplQueryService, "getValidatedTx" | "verifyOwner" | "getAccountMints">;
   config: Pick<XrplConfig, "network" | "explorerUrl">;
   /** Public base URL for metadata URIs (`ticketPublicBaseUrl()`). */
   baseUrl: string;
 }
 
-/** Memo on every mint linking the NFT to its ticket record, for later reconciliation (XRPL-026). */
-const TICKET_MEMO_TYPE = convertStringToHex("xrpl-ticketing/ticket");
 const MAX_INSTRUCTION_LENGTH = 280;
 const MAX_RECONCILE_PER_REQUEST = 20;
 
@@ -94,7 +92,11 @@ export async function requestTicketMint(
         NFTokenTaxon: ticketTaxon(event.id),
         Flags: TICKET_NFT_FLAGS,
         URI: encodeNftUri(metadataUri),
-        Memos: [{ Memo: { MemoType: TICKET_MEMO_TYPE, MemoData: convertStringToHex(ticket.id) } }],
+        Memos: [
+          {
+            Memo: { MemoType: convertStringToHex(TICKET_MEMO_TYPE), MemoData: convertStringToHex(ticket.id) },
+          },
+        ],
       },
       instruction: truncate(
         `Mint ticket NFT: ${event.title} — ${tier.name} #${ticket.serial}`,
@@ -210,9 +212,11 @@ async function applyConfirmedMint(
     });
     if (claimed.count === 0) return tx.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } });
 
-    await tx.ticketTier.update({ where: { id: ticket.tierId }, data: { mintedQuantity: { increment: 1 } } });
-    return tx.ticketNFT.update({
-      where: { id: ticket.id },
+    // Only a ticket without an NFT is updated: a mapping is never overwritten. If the ticket
+    // already has one (e.g. recorded from the ledger by the XRPL-026 reconciler), the
+    // mapping report surfaces any disagreement.
+    const updated = await tx.ticketNFT.updateMany({
+      where: { id: ticket.id, nftokenId: null },
       data: {
         mintStatus: "MINTED",
         nftokenId: confirmed.nftokenId,
@@ -225,6 +229,19 @@ async function applyConfirmedMint(
         ownerSyncLedgerIndex: holding.provenance.ledgerIndex,
       },
     });
+    const current =
+      updated.count === 1 ? null : await tx.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } });
+    if (!current) {
+      await tx.ticketTier.update({
+        where: { id: ticket.tierId },
+        data: { mintedQuantity: { increment: 1 } },
+      });
+    } else if (current.nftokenId !== confirmed.nftokenId) {
+      console.warn(
+        `[mint] ticket ${ticket.id} already maps to ${current.nftokenId}; ${confirmed.nftokenId} not recorded`,
+      );
+    }
+    return current ?? tx.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } });
   });
 }
 

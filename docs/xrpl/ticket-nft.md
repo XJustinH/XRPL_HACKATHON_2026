@@ -1,4 +1,4 @@
-# Ticket NFTs: metadata, publishing and minting (Agent B, XRPL-022 to XRPL-024)
+# Ticket NFTs: metadata, publishing, minting and mapping (Agent B, XRPL-022 to XRPL-026)
 
 Each admission ticket is one XRPL NFT, minted by the seller's own wallet. This page defines what the
 NFT carries and how it maps to the app's records. Code: `src/lib/xrpl/tickets/metadata.ts`. Contract:
@@ -140,3 +140,42 @@ Limitations:
 - A demo persona must prove its wallet again in each session (Agent A's rule for shared demo accounts).
 - Locally the metadata URI is `localhost`, so Xaman and the explorer cannot show the ticket's details
   (the panel warns when `metadataPublic` is false). The mint itself is valid.
+
+## Mapping NFTs to tickets (XRPL-026)
+
+Each minted ticket's `TicketNFT` row holds the full mapping: event, tier, issuer, metadata URI, NFTokenID
+and mint transaction. The ledger stays the source of truth, and the seller can check the two agree with
+**Check against the ledger** on the event's page (`/seller/events/:id`). It calls
+`POST /api/events/:id/mints/reconcile` (event owner only). Code: `src/lib/xrpl/tickets/mapping.ts`.
+
+- **Rebuild.** Every ticket mint carries the `xrpl-ticketing/ticket` memo with its ticket ID. The check
+  reads each issuer's validated mint history (`getAccountMints`, rippled `account_tx`) and records any
+  successful ticket mint the app missed, for example when the wallet service lost a request's outcome.
+  It is recorded exactly once: it claims the request's `LedgerTransaction` (or creates one keyed by the
+  unique transaction hash), and the tier's `mintedQuantity` goes up once.
+- **Verify.** Every `MINTED` ticket is compared with its mint transaction: from that history, or else
+  re-read with `getValidatedTx`. The NFTokenID and issuer must match.
+- **Never overwrite.** Disagreements are listed in the report and nothing is changed for them:
+
+| Problem | Meaning |
+|---|---|
+| `TICKET_NOT_FOUND` | A validated mint with this event's taxon names a ticket the app has no record of |
+| `URI_MISMATCH` / `TAXON_MISMATCH` | A ticket's mint does not carry its metadata URI or the event's taxon |
+| `TICKET_HAS_OTHER_NFT` | The ledger shows a mint for a ticket that already maps to a different NFT |
+| `NFT_MAPPED_TO_OTHER_TICKET` | The NFT already maps to another ticket. The database refuses it: `TicketNFT.nftokenId` is unique |
+| `MINT_TX_MISMATCH` | A minted ticket's recorded mint transaction shows a different NFT or issuer |
+| `MINT_TX_NOT_VALIDATED` | The ledger node could not confirm a minted ticket's mint transaction |
+
+- The request reconciler (XRPL-024) follows the same rule: it only fills in a ticket that has no NFT yet.
+- A ledger outage is an error (503), never a list of false problems.
+- Verified on Testnet (20 Nov 2026): with the mapping of the ticket minted above erased from the
+  database, one check found its mint in the issuer's history and restored the same NFTokenID, mint
+  transaction, close time and tier count. A second check recorded nothing and verified it.
+
+Limitations:
+
+- Each check reads an issuer's most recent 4,000 transactions; the report says when history went further
+  (`complete: false`). Older mints are still verified one by one through `getValidatedTx`.
+- History is limited to what the node keeps (the public Testnet node answered with about a year of
+  ledgers). A Clio node keeps everything.
+- It runs when the seller asks. A scheduled run is a follow-up (XRPL-027).
