@@ -11,7 +11,8 @@
  * offers cannot be read, the error propagates (route returns 503): nothing is listed.
  */
 import { RESALE_LIMITATION_NOTICE } from "@/contracts/checkin";
-import type { EventAvailability, EventStatus, ResaleEligibility, ResaleListing } from "@/contracts/events";
+import type { EventAvailability, ResaleEligibility, ResaleListing } from "@/contracts/events";
+import type { EventStatus } from "@/contracts/entities";
 import type { Clock } from "@/features/checkin/ports";
 import { systemClock } from "@/features/checkin/ports";
 import type { InventoryPort, OfferPort, ResalePolicyPort } from "@/features/integration/ports";
