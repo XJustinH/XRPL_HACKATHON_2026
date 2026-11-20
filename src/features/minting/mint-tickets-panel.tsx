@@ -6,7 +6,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
 import type { MintStatus } from "@/contracts/entities";
-import type { EventMints, MintMappingReport, MintRequestResult, MintTicketView } from "@/contracts/xrpl";
+import type {
+  EventMints,
+  MintMappingReport,
+  MintRequestResult,
+  MintTicketView,
+  TransactionRequest,
+} from "@/contracts/xrpl";
 import { card, NETWORK_LABEL, notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
@@ -112,6 +118,41 @@ export function MintTicketsPanel({
   );
 }
 
+/**
+ * A minting run (XRPL-025): mint `target` tickets of one tier, one Xaman approval at a time.
+ * Bounded three ways: it never asks for more than the tier's remaining quantity (the server
+ * also refuses to reserve beyond supply), it stops at the first ticket that is not confirmed,
+ * and step `index` sends `Idempotency-Key: <key>-<index>`, so retrying a step whose answer
+ * was lost replays it instead of reserving another ticket.
+ */
+interface MintRun {
+  tierId: string;
+  tierName: string;
+  target: number;
+  minted: number;
+  key: string;
+  index: number;
+  current: MintRequestResult | null;
+  phase: "requesting" | "approving" | "paused" | "finished" | "stopped";
+  message: string | null;
+  stopRequested: boolean;
+}
+
+const isRunning = (run: MintRun | null) => run?.phase === "requesting" || run?.phase === "approving";
+
+function stopReason(request: TransactionRequest): string {
+  switch (request.status) {
+    case "REJECTED":
+      return "You declined the last ticket in Xaman, so minting stopped.";
+    case "EXPIRED":
+      return "The last request expired before it was approved, so minting stopped.";
+    case "CANCELLED":
+      return "You cancelled the last request, so minting stopped.";
+    default:
+      return `The last mint did not go through (${request.engineResult ?? request.failureReason ?? "unknown reason"}), so minting stopped.`;
+  }
+}
+
 function EventMintSection({
   eventId,
   issuerAddress,
@@ -125,13 +166,13 @@ function EventMintSection({
 }) {
   const [mints, setMints] = useState<EventMints | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [active, setActive] = useState<{ result: MintRequestResult; tierName: string; done: boolean } | null>(
-    null,
-  );
-  const [mintError, setMintError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  /** Keys of mint requests that got no response, reused when the seller retries that tier. */
-  const unansweredKeys = useRef(new Map<string, string>());
+  const [run, setRunState] = useState<MintRun | null>(null);
+  // The run's source of truth for async callbacks; `run` mirrors it for rendering.
+  const runRef = useRef<MintRun | null>(null);
+  const setRun = useCallback((next: MintRun | null) => {
+    runRef.current = next;
+    setRunState(next);
+  }, []);
 
   const [reloads, setReloads] = useState(0);
   const refresh = useCallback(() => setReloads((n) => n + 1), []);
@@ -154,30 +195,69 @@ function EventMintSection({
     };
   }, [eventId, reloads, tiersVersion]);
 
-  const mint = async (tier: EventTier) => {
-    if (!issuerAddress) return;
-    const key = unansweredKeys.current.get(tier.id) ?? newIdempotencyKey();
-    setSubmitting(true);
-    setMintError(null);
-    try {
-      const result = await callApi<MintRequestResult>(`/api/events/${eventId}/mints`, {
-        method: "POST",
-        headers: { "content-type": "application/json", [IDEMPOTENCY_KEY_HEADER]: key },
-        body: JSON.stringify({ tierId: tier.id }),
-      });
-      unansweredKeys.current.delete(tier.id);
-      setActive({ result, tierName: tier.name, done: false });
-      refresh();
-    } catch (error) {
-      if (error instanceof ApiError && !error.responded) unansweredKeys.current.set(tier.id, key);
-      else unansweredKeys.current.delete(tier.id);
-      setMintError(error instanceof Error ? error.message : "Could not start the mint.");
-    } finally {
-      setSubmitting(false);
-    }
+  const requestStep = useCallback(
+    async (step: MintRun) => {
+      setRun({ ...step, phase: "requesting", current: null, message: null });
+      try {
+        const result = await callApi<MintRequestResult>(`/api/events/${eventId}/mints`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [IDEMPOTENCY_KEY_HEADER]: `${step.key}-${step.index}`,
+          },
+          body: JSON.stringify({ tierId: step.tierId }),
+        });
+        setRun({ ...(runRef.current ?? step), current: result, phase: "approving" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not start the mint.";
+        // No answer: the same step may be retried with the same key. An answer: stop here.
+        const paused = error instanceof ApiError && !error.responded;
+        setRun({ ...(runRef.current ?? step), phase: paused ? "paused" : "stopped", message });
+      } finally {
+        refresh();
+      }
+    },
+    [eventId, refresh, setRun],
+  );
+
+  const startRun = (tier: EventTier, count: number) => {
+    if (!issuerAddress || count < 1 || isRunning(runRef.current)) return;
+    void requestStep({
+      tierId: tier.id,
+      tierName: tier.name,
+      target: count,
+      minted: 0,
+      key: newIdempotencyKey(),
+      index: 0,
+      current: null,
+      phase: "requesting",
+      message: null,
+      stopRequested: false,
+    });
   };
 
-  const busy = submitting || (active !== null && !active.done);
+  const onStepFinished = (request: TransactionRequest) => {
+    const step = runRef.current;
+    refresh();
+    if (!step || step.current?.request.id !== request.id) return;
+    if (request.status !== "CONFIRMED") {
+      setRun({ ...step, phase: "stopped", message: stopReason(request) });
+      return;
+    }
+    const minted = step.minted + 1;
+    if (minted >= step.target) {
+      setRun({ ...step, minted, phase: "finished", message: null });
+    } else if (step.stopRequested) {
+      setRun({
+        ...step,
+        minted,
+        phase: "stopped",
+        message: `Stopped after ${minted} of ${step.target}, as asked.`,
+      });
+    } else {
+      void requestStep({ ...step, minted, index: step.index + 1 });
+    }
+  };
 
   if (!mints) {
     return loadError ? (
@@ -191,39 +271,30 @@ function EventMintSection({
     );
   }
 
+  const busy = isRunning(run);
   return (
     <div className="mt-4 flex flex-col gap-4">
-      {mintError ? (
-        <p role="alert" className={notice.critical}>
-          {mintError}
-        </p>
-      ) : null}
       {loadError ? (
         <p role="alert" className={notice.caution}>
           {loadError}
         </p>
       ) : null}
 
-      {active ? (
-        <div className="flex flex-col gap-3">
-          {!active.result.metadataPublic ? (
-            <p className={notice.caution}>
-              This app is not on a public address, so wallets and explorers cannot load this ticket&apos;s
-              details yet. The mint itself works; set TICKET_METADATA_BASE_URL to the deployed URL to publish
-              them.
-            </p>
-          ) : null}
-          <TransactionApproval
-            key={active.result.request.id}
-            request={active.result.request}
-            title={`Approve the mint: ${active.tierName} #${active.result.ticket.serial}`}
-            pollIntervalMs={pollIntervalMs}
-            onFinished={() => {
-              setActive((current) => (current ? { ...current, done: true } : current));
-              refresh();
-            }}
-          />
-        </div>
+      {run ? (
+        <MintRunProgress
+          run={run}
+          pollIntervalMs={pollIntervalMs}
+          onStepFinished={onStepFinished}
+          onStop={() => {
+            const step = runRef.current;
+            if (step) setRun({ ...step, stopRequested: true });
+          }}
+          onRetry={() => {
+            const step = runRef.current;
+            if (step) void requestStep(step);
+          }}
+          onDismiss={() => setRun(null)}
+        />
       ) : null}
 
       {mints.tiers.length === 0 ? (
@@ -235,7 +306,7 @@ function EventMintSection({
               key={tier.id}
               tier={tier}
               canMint={issuerAddress !== null && !busy}
-              onMint={() => void mint(tier)}
+              onMint={(count) => startRun(tier, count)}
             />
           ))}
         </ul>
@@ -243,6 +314,105 @@ function EventMintSection({
 
       <LedgerCheck eventId={eventId} onRecorded={refresh} />
     </div>
+  );
+}
+
+/** Progress of a minting run: how many are minted, the current approval, and why it stopped. */
+function MintRunProgress({
+  run,
+  pollIntervalMs,
+  onStepFinished,
+  onStop,
+  onRetry,
+  onDismiss,
+}: {
+  run: MintRun;
+  pollIntervalMs?: number;
+  onStepFinished: (request: TransactionRequest) => void;
+  onStop: () => void;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  const ticketNumber = Math.min(run.minted + 1, run.target);
+  return (
+    <section
+      aria-label="Minting progress"
+      className="flex flex-col gap-3 rounded-lg border border-border p-4"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">Minting {run.tierName}</h3>
+        <p className="text-sm text-muted">
+          {run.minted} of {run.target} minted
+        </p>
+      </div>
+      <progress
+        className="h-2 w-full"
+        value={run.minted}
+        max={run.target}
+        aria-label={`${run.minted} of ${run.target} tickets minted`}
+      />
+
+      {run.phase === "requesting" ? (
+        <p role="status" className="text-sm text-muted">
+          Preparing ticket {ticketNumber} of {run.target}…
+        </p>
+      ) : null}
+
+      {run.phase === "approving" && run.current ? (
+        <>
+          {!run.current.metadataPublic ? (
+            <p className={notice.caution}>
+              This app is not on a public address, so wallets and explorers cannot load this ticket&apos;s
+              details yet. The mint itself works; set TICKET_METADATA_BASE_URL to the deployed URL to publish
+              them.
+            </p>
+          ) : null}
+          <TransactionApproval
+            key={run.current.request.id}
+            request={run.current.request}
+            title={`Approve the mint: ${run.tierName} #${run.current.ticket.serial} (${ticketNumber} of ${run.target})`}
+            pollIntervalMs={pollIntervalMs}
+            onFinished={onStepFinished}
+          />
+          {run.target > 1 && run.minted + 1 < run.target ? (
+            <div>
+              <button type="button" onClick={onStop} disabled={run.stopRequested} className={secondaryButton}>
+                {run.stopRequested ? "Stopping after this ticket" : "Stop after this ticket"}
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {run.phase === "finished" ? (
+        <p role="status" className={notice.positive}>
+          Minted {plural(run.minted, "ticket")} of {run.tierName} on {NETWORK_LABEL}.
+        </p>
+      ) : null}
+      {run.phase === "paused" || run.phase === "stopped" ? (
+        <p role="alert" className={run.phase === "paused" ? notice.caution : notice.critical}>
+          {run.message}
+        </p>
+      ) : null}
+
+      {run.phase === "paused" ? (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={onRetry} className={primaryButton}>
+            Try again
+          </button>
+          <button type="button" onClick={onDismiss} className={secondaryButton}>
+            Stop
+          </button>
+        </div>
+      ) : null}
+      {run.phase === "finished" || run.phase === "stopped" ? (
+        <div>
+          <button type="button" onClick={onDismiss} className={secondaryButton}>
+            Done
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -341,9 +511,32 @@ function LedgerCheckResult({ report }: { report: MintMappingReport }) {
   );
 }
 
-function TierRow({ tier, canMint, onMint }: { tier: EventTier; canMint: boolean; onMint: () => void }) {
-  const reserved = tier.tickets.filter((t) => t.mintStatus !== "FAILED").length;
-  const soldOut = reserved >= tier.totalSupply;
+/** Separate counts of a tier's minted, pending and failed tickets, and what is left to mint. */
+function tierProgress(tier: EventTier) {
+  const minted = tier.tickets.filter((t) => t.mintStatus === "MINTED");
+  const pending = tier.tickets.filter((t) => t.mintStatus === "PENDING" || t.mintStatus === "SUBMITTED");
+  const failed = tier.tickets.filter((t) => t.mintStatus === "FAILED");
+  // Failed tickets never produced an NFT and are reused, so they are still left to mint.
+  const remaining = Math.max(tier.totalSupply - minted.length - pending.length, 0);
+  return { minted, pending, failed, remaining };
+}
+
+function TierRow({
+  tier,
+  canMint,
+  onMint,
+}: {
+  tier: EventTier;
+  canMint: boolean;
+  onMint: (count: number) => void;
+}) {
+  const { minted, pending, failed, remaining } = tierProgress(tier);
+  const groups = [
+    { label: "Minted", tickets: minted },
+    { label: "Pending", tickets: pending },
+    { label: "Failed", tickets: failed },
+  ].filter((group) => group.tickets.length > 0);
+
   return (
     <li className="rounded-lg border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -352,23 +545,54 @@ function TierRow({ tier, canMint, onMint }: { tier: EventTier; canMint: boolean;
           <p className="text-sm text-muted">
             {formatDropsAsXrp(tier.priceDrops)} XRP · Minted {tier.mintedQuantity} of {tier.totalSupply}
           </p>
+          <p className="text-sm text-muted">
+            {minted.length} minted · {pending.length} pending · {failed.length} failed
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={onMint}
-          disabled={!canMint || soldOut}
-          className={`${primaryButton} w-full sm:w-auto`}
-        >
-          {soldOut ? "All tickets minted" : "Mint next ticket"}
-        </button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {remaining === 0 ? (
+            <button type="button" disabled className={`${primaryButton} w-full sm:w-auto`}>
+              {pending.length > 0 ? "Waiting on pending mints" : "All tickets minted"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onMint(1)}
+                disabled={!canMint}
+                className={`${remaining > 1 ? secondaryButton : primaryButton} w-full sm:w-auto`}
+              >
+                Mint next ticket
+              </button>
+              {remaining > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => onMint(remaining)}
+                  disabled={!canMint}
+                  className={`${primaryButton} w-full sm:w-auto`}
+                >
+                  Mint all {remaining} remaining
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
-      {tier.tickets.length > 0 ? (
-        <ul className="mt-3 flex flex-col gap-2 text-sm" aria-label={`${tier.name} tickets`}>
-          {tier.tickets.map((ticket) => (
-            <TicketRow key={ticket.id} ticket={ticket} />
-          ))}
-        </ul>
-      ) : null}
+      {groups.map((group) => (
+        <details key={group.label} open={group.tickets.length <= 8} className="mt-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {group.label} ({group.tickets.length})
+          </summary>
+          <ul
+            className="mt-2 flex flex-col gap-2 text-sm"
+            aria-label={`${tier.name}: ${group.label.toLowerCase()} tickets`}
+          >
+            {group.tickets.map((ticket) => (
+              <TicketRow key={ticket.id} ticket={ticket} />
+            ))}
+          </ul>
+        </details>
+      ))}
     </li>
   );
 }
