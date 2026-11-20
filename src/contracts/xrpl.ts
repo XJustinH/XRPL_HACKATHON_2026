@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, pageOf, TxHash, XrplAddress } from "./common";
-import { TicketDto, TicketTierDto, XrplNetwork } from "./entities";
+import { NFTOfferDto, OfferState, TicketDto, TicketTierDto, XrplNetwork } from "./entities";
 
 /**
  * XRPL contract types. Owner: Agent B.
@@ -316,7 +316,7 @@ export type SignRequest = z.infer<typeof SignRequest>;
  * transaction type, built on the server by the issue that owns it (e.g. mint: XRPL-024).
  * TEST is a no-op AccountSet for checking the approval flow during development.
  */
-export const TransactionPurpose = z.enum(["TEST", "MINT_TICKET"]);
+export const TransactionPurpose = z.enum(["TEST", "MINT_TICKET", "CREATE_PRIMARY_OFFER"]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
 /**
@@ -452,9 +452,20 @@ export const CreateMintBody = z.object({ tierId: AppId });
 export type CreateMintBody = z.infer<typeof CreateMintBody>;
 
 /** A ticket record plus explorer links once its NFT exists. */
+/** A ticket's latest primary sale offer, as the seller's panel shows it (XRPL-029). */
+export const PrimaryOfferSummary = z.object({
+  id: AppId,
+  state: OfferState,
+  amountDrops: Drops,
+  offerIndex: OfferIndex.nullable(),
+});
+export type PrimaryOfferSummary = z.infer<typeof PrimaryOfferSummary>;
+
 export const MintTicketView = TicketDto.extend({
   nftExplorerUrl: z.string().nullable(),
   mintTxExplorerUrl: z.string().nullable(),
+  /** Latest primary sale offer for this ticket (XRPL-029), or null if never listed. */
+  primaryOffer: PrimaryOfferSummary.nullable(),
 });
 export type MintTicketView = z.infer<typeof MintTicketView>;
 
@@ -525,3 +536,43 @@ export const MintMappingReport = z.object({
   checkedAt: IsoDateTime,
 });
 export type MintMappingReport = z.infer<typeof MintMappingReport>;
+
+// ---------------------------------------------------------------------------
+// Primary sale offers (XRPL-029)
+// ---------------------------------------------------------------------------
+
+/** Body of `POST /api/tickets/:id/primary-offers`. The price is always the ticket tier's price. */
+export const CreatePrimaryOfferBody = z.object({}).strict();
+export type CreatePrimaryOfferBody = z.infer<typeof CreatePrimaryOfferBody>;
+
+/** Response of `POST /api/tickets/:id/primary-offers`. Render `request` with the approval UI. */
+export const PrimaryOfferRequestResult = z.object({
+  offer: NFTOfferDto,
+  request: TransactionRequest,
+});
+export type PrimaryOfferRequestResult = z.infer<typeof PrimaryOfferRequestResult>;
+
+/**
+ * A live primary sell offer a buyer can accept: Agent C's `OfferPort.PrimaryOffer` fields plus
+ * the ticket it sells. Only ACTIVE offers on unsold minted tickets are listed.
+ */
+export const PrimaryOfferListing = z.object({
+  offerId: AppId,
+  offerIndex: OfferIndex,
+  nftokenId: NFTokenId,
+  sellerAddress: XrplAddress,
+  amountDrops: Drops,
+  tierId: AppId,
+  tierName: z.string(),
+  ticketId: AppId,
+  serial: z.number().int().positive(),
+  expiresAt: IsoDateTime.nullable(),
+});
+export type PrimaryOfferListing = z.infer<typeof PrimaryOfferListing>;
+
+/** Response of `GET /api/events/:id/primary-offers`: live primary offers, cheapest first. */
+export const EventPrimaryOffers = z.object({
+  eventId: AppId,
+  offers: z.array(PrimaryOfferListing),
+});
+export type EventPrimaryOffers = z.infer<typeof EventPrimaryOffers>;

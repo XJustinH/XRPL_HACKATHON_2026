@@ -11,6 +11,7 @@ import type {
   MintMappingReport,
   MintRequestResult,
   MintTicketView,
+  PrimaryOfferRequestResult,
   TransactionRequest,
 } from "@/contracts/xrpl";
 import { card, NETWORK_LABEL, notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
@@ -119,38 +120,53 @@ export function MintTicketsPanel({
 }
 
 /**
- * A minting run (XRPL-025): mint `target` tickets of one tier, one Xaman approval at a time.
- * Bounded three ways: it never asks for more than the tier's remaining quantity (the server
- * also refuses to reserve beyond supply), it stops at the first ticket that is not confirmed,
+ * A run of seller approvals for one tier, one Xaman request at a time: minting tickets
+ * (XRPL-025) or listing minted tickets for sale at the tier price (XRPL-029).
+ * Bounded three ways: it never asks for more than is left (the server also refuses to reserve
+ * beyond supply or list a ticket twice), it stops at the first request that is not confirmed,
  * and step `index` sends `Idempotency-Key: <key>-<index>`, so retrying a step whose answer
- * was lost replays it instead of reserving another ticket.
+ * was lost replays it instead of creating another ticket or offer.
  */
-interface MintRun {
+interface Run {
+  kind: "mint" | "list";
   tierId: string;
   tierName: string;
+  priceDrops: string;
+  /** Tickets to list, in order (list runs only). */
+  queue: Array<{ ticketId: string; serial: number }>;
   target: number;
-  minted: number;
+  done: number;
   key: string;
   index: number;
-  current: MintRequestResult | null;
+  current: { request: TransactionRequest; serial: number; metadataPublic: boolean } | null;
   phase: "requesting" | "approving" | "paused" | "finished" | "stopped";
   message: string | null;
   stopRequested: boolean;
 }
 
-const isRunning = (run: MintRun | null) => run?.phase === "requesting" || run?.phase === "approving";
+const isRunning = (run: Run | null) => run?.phase === "requesting" || run?.phase === "approving";
 
-function stopReason(request: TransactionRequest): string {
+function stopReason(kind: Run["kind"], request: TransactionRequest): string {
+  const verb = kind === "mint" ? "minting" : "listing";
   switch (request.status) {
     case "REJECTED":
-      return "You declined the last ticket in Xaman, so minting stopped.";
+      return kind === "mint"
+        ? "You declined the last ticket in Xaman, so minting stopped."
+        : "You declined the last listing in Xaman, so listing stopped.";
     case "EXPIRED":
-      return "The last request expired before it was approved, so minting stopped.";
+      return `The last request expired before it was approved, so ${verb} stopped.`;
     case "CANCELLED":
-      return "You cancelled the last request, so minting stopped.";
+      return `You cancelled the last request, so ${verb} stopped.`;
     default:
-      return `The last mint did not go through (${request.engineResult ?? request.failureReason ?? "unknown reason"}), so minting stopped.`;
+      return `The last ${kind === "mint" ? "mint" : "listing"} did not go through (${request.engineResult ?? request.failureReason ?? "unknown reason"}), so ${verb} stopped.`;
   }
+}
+
+/** A minted ticket that can be listed for primary sale now (XRPL-029). */
+function isListable(ticket: MintTicketView): boolean {
+  if (ticket.mintStatus !== "MINTED" || ticket.primarySoldAt) return false;
+  const state = ticket.primaryOffer?.state;
+  return state !== "ACTIVE" && state !== "PENDING_SIGNATURE";
 }
 
 function EventMintSection({
@@ -166,10 +182,10 @@ function EventMintSection({
 }) {
   const [mints, setMints] = useState<EventMints | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [run, setRunState] = useState<MintRun | null>(null);
+  const [run, setRunState] = useState<Run | null>(null);
   // The run's source of truth for async callbacks; `run` mirrors it for rendering.
-  const runRef = useRef<MintRun | null>(null);
-  const setRun = useCallback((next: MintRun | null) => {
+  const runRef = useRef<Run | null>(null);
+  const setRun = useCallback((next: Run | null) => {
     runRef.current = next;
     setRunState(next);
   }, []);
@@ -177,7 +193,7 @@ function EventMintSection({
   const [reloads, setReloads] = useState(0);
   const refresh = useCallback(() => setReloads((n) => n + 1), []);
 
-  // Load (and reconcile) the event's tickets; reloaded after each mint. Late answers are ignored.
+  // Load (and reconcile) the event's tickets and listings; reloaded after each step. Late answers are ignored.
   useEffect(() => {
     let current = true;
     callApi<EventMints>(`/api/events/${eventId}/mints`).then(
@@ -196,20 +212,36 @@ function EventMintSection({
   }, [eventId, reloads, tiersVersion]);
 
   const requestStep = useCallback(
-    async (step: MintRun) => {
+    async (step: Run) => {
       setRun({ ...step, phase: "requesting", current: null, message: null });
+      const headers = {
+        "content-type": "application/json",
+        [IDEMPOTENCY_KEY_HEADER]: `${step.key}-${step.index}`,
+      };
       try {
-        const result = await callApi<MintRequestResult>(`/api/events/${eventId}/mints`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            [IDEMPOTENCY_KEY_HEADER]: `${step.key}-${step.index}`,
-          },
-          body: JSON.stringify({ tierId: step.tierId }),
-        });
-        setRun({ ...(runRef.current ?? step), current: result, phase: "approving" });
+        let current: NonNullable<Run["current"]>;
+        if (step.kind === "mint") {
+          const result = await callApi<MintRequestResult>(`/api/events/${eventId}/mints`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ tierId: step.tierId }),
+          });
+          current = {
+            request: result.request,
+            serial: result.ticket.serial,
+            metadataPublic: result.metadataPublic,
+          };
+        } else {
+          const ticket = step.queue[step.index]!;
+          const result = await callApi<PrimaryOfferRequestResult>(
+            `/api/tickets/${ticket.ticketId}/primary-offers`,
+            { method: "POST", headers, body: JSON.stringify({}) },
+          );
+          current = { request: result.request, serial: ticket.serial, metadataPublic: true };
+        }
+        setRun({ ...(runRef.current ?? step), current, phase: "approving" });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not start the mint.";
+        const message = error instanceof Error ? error.message : "Could not send the request.";
         // No answer: the same step may be retried with the same key. An answer: stop here.
         const paused = error instanceof ApiError && !error.responded;
         setRun({ ...(runRef.current ?? step), phase: paused ? "paused" : "stopped", message });
@@ -220,13 +252,16 @@ function EventMintSection({
     [eventId, refresh, setRun],
   );
 
-  const startRun = (tier: EventTier, count: number) => {
+  const startRun = (tier: EventTier, kind: Run["kind"], count: number, queue: Run["queue"] = []) => {
     if (!issuerAddress || count < 1 || isRunning(runRef.current)) return;
     void requestStep({
+      kind,
       tierId: tier.id,
       tierName: tier.name,
+      priceDrops: tier.priceDrops,
+      queue,
       target: count,
-      minted: 0,
+      done: 0,
       key: newIdempotencyKey(),
       index: 0,
       current: null,
@@ -241,21 +276,21 @@ function EventMintSection({
     refresh();
     if (!step || step.current?.request.id !== request.id) return;
     if (request.status !== "CONFIRMED") {
-      setRun({ ...step, phase: "stopped", message: stopReason(request) });
+      setRun({ ...step, phase: "stopped", message: stopReason(step.kind, request) });
       return;
     }
-    const minted = step.minted + 1;
-    if (minted >= step.target) {
-      setRun({ ...step, minted, phase: "finished", message: null });
+    const done = step.done + 1;
+    if (done >= step.target) {
+      setRun({ ...step, done, phase: "finished", message: null });
     } else if (step.stopRequested) {
       setRun({
         ...step,
-        minted,
+        done,
         phase: "stopped",
-        message: `Stopped after ${minted} of ${step.target}, as asked.`,
+        message: `Stopped after ${done} of ${step.target}, as asked.`,
       });
     } else {
-      void requestStep({ ...step, minted, index: step.index + 1 });
+      void requestStep({ ...step, done, index: step.index + 1 });
     }
   };
 
@@ -281,7 +316,7 @@ function EventMintSection({
       ) : null}
 
       {run ? (
-        <MintRunProgress
+        <RunProgress
           run={run}
           pollIntervalMs={pollIntervalMs}
           onStepFinished={onStepFinished}
@@ -305,8 +340,16 @@ function EventMintSection({
             <TierRow
               key={tier.id}
               tier={tier}
-              canMint={issuerAddress !== null && !busy}
-              onMint={(count) => startRun(tier, count)}
+              canAct={issuerAddress !== null && !busy}
+              onMint={(count) => startRun(tier, "mint", count)}
+              onList={(tickets) =>
+                startRun(
+                  tier,
+                  "list",
+                  tickets.length,
+                  tickets.map((t) => ({ ticketId: t.id, serial: t.serial })),
+                )
+              }
             />
           ))}
         </ul>
@@ -317,8 +360,8 @@ function EventMintSection({
   );
 }
 
-/** Progress of a minting run: how many are minted, the current approval, and why it stopped. */
-function MintRunProgress({
+/** Progress of a run: how many are done, the current approval, and why it stopped. */
+function RunProgress({
   run,
   pollIntervalMs,
   onStepFinished,
@@ -326,30 +369,39 @@ function MintRunProgress({
   onRetry,
   onDismiss,
 }: {
-  run: MintRun;
+  run: Run;
   pollIntervalMs?: number;
   onStepFinished: (request: TransactionRequest) => void;
   onStop: () => void;
   onRetry: () => void;
   onDismiss: () => void;
 }) {
-  const ticketNumber = Math.min(run.minted + 1, run.target);
+  const ticketNumber = Math.min(run.done + 1, run.target);
+  const price = `${formatDropsAsXrp(run.priceDrops)} XRP`;
+  const minting = run.kind === "mint";
+  const doneLabel = `${run.done} of ${run.target} ${minting ? "minted" : "listed"}`;
+  const approvalTitle = run.current
+    ? minting
+      ? `Approve the mint: ${run.tierName} #${run.current.serial} (${ticketNumber} of ${run.target})`
+      : `Approve the listing: ${run.tierName} #${run.current.serial} at ${price} (${ticketNumber} of ${run.target})`
+    : "";
+
   return (
     <section
-      aria-label="Minting progress"
+      aria-label={minting ? "Minting progress" : "Listing progress"}
       className="flex flex-col gap-3 rounded-lg border border-border p-4"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">Minting {run.tierName}</h3>
-        <p className="text-sm text-muted">
-          {run.minted} of {run.target} minted
-        </p>
+        <h3 className="text-sm font-semibold">
+          {minting ? `Minting ${run.tierName}` : `Listing ${run.tierName} for sale at ${price}`}
+        </h3>
+        <p className="text-sm text-muted">{doneLabel}</p>
       </div>
       <progress
         className="h-2 w-full"
-        value={run.minted}
+        value={run.done}
         max={run.target}
-        aria-label={`${run.minted} of ${run.target} tickets minted`}
+        aria-label={`${run.done} of ${run.target} tickets ${minting ? "minted" : "listed"}`}
       />
 
       {run.phase === "requesting" ? (
@@ -370,11 +422,11 @@ function MintRunProgress({
           <TransactionApproval
             key={run.current.request.id}
             request={run.current.request}
-            title={`Approve the mint: ${run.tierName} #${run.current.ticket.serial} (${ticketNumber} of ${run.target})`}
+            title={approvalTitle}
             pollIntervalMs={pollIntervalMs}
             onFinished={onStepFinished}
           />
-          {run.target > 1 && run.minted + 1 < run.target ? (
+          {run.target > 1 && run.done + 1 < run.target ? (
             <div>
               <button type="button" onClick={onStop} disabled={run.stopRequested} className={secondaryButton}>
                 {run.stopRequested ? "Stopping after this ticket" : "Stop after this ticket"}
@@ -386,7 +438,9 @@ function MintRunProgress({
 
       {run.phase === "finished" ? (
         <p role="status" className={notice.positive}>
-          Minted {plural(run.minted, "ticket")} of {run.tierName} on {NETWORK_LABEL}.
+          {minting
+            ? `Minted ${plural(run.done, "ticket")} of ${run.tierName} on ${NETWORK_LABEL}.`
+            : `Listed ${plural(run.done, "ticket")} of ${run.tierName} for sale at ${price}.`}
         </p>
       ) : null}
       {run.phase === "paused" || run.phase === "stopped" ? (
@@ -523,14 +577,20 @@ function tierProgress(tier: EventTier) {
 
 function TierRow({
   tier,
-  canMint,
+  canAct,
   onMint,
+  onList,
 }: {
   tier: EventTier;
-  canMint: boolean;
+  canAct: boolean;
   onMint: (count: number) => void;
+  onList: (tickets: MintTicketView[]) => void;
 }) {
   const { minted, pending, failed, remaining } = tierProgress(tier);
+  const listable = minted.filter(isListable);
+  const forSale = minted.filter((t) => !t.primarySoldAt && t.primaryOffer?.state === "ACTIVE").length;
+  const sold = minted.filter((t) => t.primarySoldAt).length;
+  const price = `${formatDropsAsXrp(tier.priceDrops)} XRP`;
   const groups = [
     { label: "Minted", tickets: minted },
     { label: "Pending", tickets: pending },
@@ -548,6 +608,11 @@ function TierRow({
           <p className="text-sm text-muted">
             {minted.length} minted · {pending.length} pending · {failed.length} failed
           </p>
+          {forSale > 0 || sold > 0 ? (
+            <p className="text-sm text-muted">
+              {forSale} for sale · {sold} sold
+            </p>
+          ) : null}
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           {remaining === 0 ? (
@@ -559,7 +624,7 @@ function TierRow({
               <button
                 type="button"
                 onClick={() => onMint(1)}
-                disabled={!canMint}
+                disabled={!canAct}
                 className={`${remaining > 1 ? secondaryButton : primaryButton} w-full sm:w-auto`}
               >
                 Mint next ticket
@@ -568,7 +633,7 @@ function TierRow({
                 <button
                   type="button"
                   onClick={() => onMint(remaining)}
-                  disabled={!canMint}
+                  disabled={!canAct}
                   className={`${primaryButton} w-full sm:w-auto`}
                 >
                   Mint all {remaining} remaining
@@ -576,6 +641,18 @@ function TierRow({
               ) : null}
             </>
           )}
+          {listable.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => onList(listable)}
+              disabled={!canAct}
+              className={`${primaryButton} w-full sm:w-auto`}
+            >
+              {listable.length === 1
+                ? `List 1 for sale at ${price}`
+                : `List ${listable.length} for sale at ${price}`}
+            </button>
+          ) : null}
         </div>
       </div>
       {groups.map((group) => (
@@ -597,12 +674,31 @@ function TierRow({
   );
 }
 
+/** Primary sale status of a minted ticket (XRPL-029), or null when it was never listed. */
+function saleStatus(ticket: MintTicketView): { label: string; tone: BadgeTone } | null {
+  if (ticket.primarySoldAt) return { label: "Sold", tone: "positive" };
+  const offer = ticket.primaryOffer;
+  if (!offer) return null;
+  switch (offer.state) {
+    case "ACTIVE":
+      return { label: `For sale · ${formatDropsAsXrp(offer.amountDrops)} XRP`, tone: "accent" };
+    case "PENDING_SIGNATURE":
+      return { label: "Listing: awaiting approval", tone: "neutral" };
+    case "ACCEPTED":
+      return { label: "Sold", tone: "positive" };
+    default:
+      return { label: "Not for sale", tone: "neutral" };
+  }
+}
+
 function TicketRow({ ticket }: { ticket: MintTicketView }) {
   const status = STATUS[ticket.mintStatus];
+  const sale = ticket.mintStatus === "MINTED" ? saleStatus(ticket) : null;
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <span className="font-medium">#{ticket.serial}</span>
       <Badge tone={status.tone}>{status.label}</Badge>
+      {sale ? <Badge tone={sale.tone}>{sale.label}</Badge> : null}
       {ticket.nftokenId && ticket.nftExplorerUrl ? (
         <a href={ticket.nftExplorerUrl} target="_blank" rel="noopener noreferrer" className="underline">
           NFT <span className="font-mono text-xs">{shortId(ticket.nftokenId)}</span>
