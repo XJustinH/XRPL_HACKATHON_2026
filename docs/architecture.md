@@ -11,7 +11,8 @@ Detailed agent ownership and the route catalogue live in [CLAUDE_AGENT_HANDOFFS.
 
 | Layer | Choice | Version pinned in repo | Notes |
 |---|---|---|---|
-| Web app + API | Next.js App Router, route handlers under `src/app/api/` | 16.4 | One deployable. `cacheComponents` is on: GET handlers that touch the DB or request data run per request. |
+| Web app + API | Next.js App Router, route handlers under `src/app/api/` | 16.4 | One deployable. `cacheComponents` is off. GET route handlers that read the DB or request data run per request. |
+| UI | React 19.1 + Tailwind CSS 4, Testing Library | — | App shell and navigation from XRPL-003 (Agent C). |
 | Language | TypeScript, strict | 5.x | Path alias `@/*` → `src/*`. |
 | Database | PostgreSQL | 17 (Docker locally) | `docker-compose.yml` for local dev; deployed envs supply `DATABASE_URL`. |
 | ORM / migrations | Prisma (`prisma-client` generator, `@prisma/adapter-pg`) | 7.10 | Client generated to `src/generated/prisma` (git-ignored, built on `postinstall`). |
@@ -19,7 +20,7 @@ Detailed agent ownership and the route catalogue live in [CLAUDE_AGENT_HANDOFFS.
 | XRPL access | `xrpl` (xrpl.js) behind Agent B's adapter in `src/lib/xrpl/` | — | No other module talks to the ledger directly. |
 | Wallet signing | Xaman (Xumm) sign requests + SignIn, server-side SDK | — | Non-custodial. The app never sees a seed or private key. |
 | Media / metadata | S3-compatible object storage + public base URL | — | Ticket metadata JSON must be publicly retrievable and stable. |
-| Tests | Vitest (unit + DB integration), Playwright for e2e (Agent E) | Vitest 4.1 | Vitest 5.x was evaluated and rejected for now: it failed on a trivial test in this environment. |
+| Tests | Vitest projects: `unit` (jsdom, Testing Library) and `db` (Node + Postgres); Playwright for e2e (Agent E) | Vitest 3.2 | Server-side unit tests opt into Node with `// @vitest-environment node`. |
 
 ## 2. Responsibilities
 

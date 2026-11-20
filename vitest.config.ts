@@ -4,15 +4,26 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [react()],
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./vitest.setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
-  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
+  },
+  test: {
+    projects: [
+      {
+        // UI and pure-logic tests. Server-side test files opt into Node with
+        // a `// @vitest-environment node` docblock.
+        extends: true,
+        test: {
+          name: "unit",
+          environment: "jsdom",
+          globals: true,
+          setupFiles: ["./vitest.setup.ts"],
+          include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
+          exclude: ["**/*.int.test.ts", "node_modules/**"],
+        },
+      },
+    ],
   },
 });
