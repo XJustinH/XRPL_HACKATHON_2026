@@ -1,0 +1,12 @@
+// Application data model. Owner: Agent A.
+// Other agents request changes; do not add parallel migrations.
+// Models are added in XRPL-005.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

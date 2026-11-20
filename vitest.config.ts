@@ -24,6 +24,17 @@ export default defineConfig({
           exclude: ["**/*.int.test.ts", "node_modules/**"],
         },
       },
+      {
+        // Requires Postgres (`npm run db:up`) and TEST_DATABASE_URL.
+        // DB test files share one database: keep them in a single file or make them independent.
+        extends: true,
+        test: {
+          name: "db",
+          environment: "node",
+          include: ["src/**/*.int.test.ts"],
+          globalSetup: ["./src/lib/db/test-global-setup.ts"],
+        },
+      },
     ],
   },
 });

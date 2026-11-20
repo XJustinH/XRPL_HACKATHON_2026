@@ -1,0 +1,22 @@
+# Local development database only. Deployed environments supply their own DATABASE_URL.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: xrpl-ticketing-postgres
+    environment:
+      POSTGRES_USER: xrpl
+      POSTGRES_PASSWORD: xrpl_local_only
+      POSTGRES_DB: xrpl_ticketing
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xrpl -d xrpl_ticketing"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
