@@ -212,6 +212,10 @@ model Event {
   endsAt      DateTime?   @db.Timestamptz(3)
   venue       String
   city        String
+  /// Event category chosen by the seller (XRPL-015), filterable in discovery (XRPL-059).
+  /// Null for events created before the field existed. The allowed values are defined by the events
+  /// contract (src/contracts/events.ts, Agent C); the database only enforces a trimmed, 1–40 character value.
+  category    String?
   status      EventStatus @default(DRAFT)
   artworkUrl  String?
   publishedAt DateTime?   @db.Timestamptz(3)
@@ -225,6 +229,8 @@ model Event {
   checkIns          CheckInRecord[]
 
   @@index([status, startsAt])
+  /// Discovery filter (XRPL-059): published events of a category, soonest first.
+  @@index([status, category, startsAt])
   @@index([sellerId])
 }
 

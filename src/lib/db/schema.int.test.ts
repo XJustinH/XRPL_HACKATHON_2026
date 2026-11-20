@@ -181,3 +181,40 @@ describe("wallet links", () => {
     expect(link.network).toBe("TESTNET");
   });
 });
+
+describe("event category (XRPL-015 / XRPL-059)", () => {
+  it("is optional and stores the seller's choice", async () => {
+    const { event, seller } = await seedEvent();
+    expect(event.category).toBeNull();
+    const music = await db.event.create({
+      data: {
+        sellerId: seller.id,
+        title: "Gig",
+        startsAt: new Date("2026-12-02T20:00:00Z"),
+        venue: "V",
+        city: "Dublin",
+        category: "MUSIC",
+      },
+    });
+    expect(music.category).toBe("MUSIC");
+  });
+
+  it.each(["", "   ", " MUSIC", "MUSIC ", "x".repeat(41)])("rejects %j (no category is NULL, values are trimmed)", async (category) => {
+    const { event } = await seedEvent();
+    await expect(db.event.update({ where: { id: event.id }, data: { category } })).rejects.toThrow(/Event_category_format/);
+  });
+
+  it("can filter published events by category", async () => {
+    const { seller } = await seedEvent();
+    const base = { sellerId: seller.id, venue: "V", city: "Dublin", startsAt: new Date("2026-12-03T20:00:00Z") };
+    await db.event.createMany({
+      data: [
+        { ...base, title: "A", category: "MUSIC", status: "PUBLISHED" },
+        { ...base, title: "B", category: "COMEDY", status: "PUBLISHED" },
+        { ...base, title: "C", category: "MUSIC", status: "DRAFT" },
+      ],
+    });
+    const found = await db.event.findMany({ where: { status: "PUBLISHED", category: "MUSIC" }, select: { title: true } });
+    expect(found.map((e) => e.title)).toEqual(["A"]);
+  });
+});
