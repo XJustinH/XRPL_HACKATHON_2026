@@ -200,3 +200,26 @@ seller only.
 The chart has one series, so no legend. It has a hover and focus tooltip on every bar, and a
 "Show as table" view. Bar colour is `#1d4ed8` in light mode and `#5f88ee` in dark mode, both passing
 the dataviz palette checks against the card surface. Resales made outside the app are not counted.
+
+## Reviews from verified attendees (XRPL-079)
+
+**Status:** logic, routes, attendance check and UI are done. **Saving and listing wait on Agent A's
+`Review` table** (requested); until it lands they answer 503 ("Reviews aren't available yet").
+
+- **Who may review:** a customer whose **verified, unrevoked** `WalletLink` address has a `CheckInRecord`
+  for the event (`src/features/reviews/attendance.ts`). Checked on the server for every create and edit.
+- **One review per customer per event:** a second post gets 409 `ALREADY_REVIEWED`; edit with PATCH.
+- **Rating** 1–5 whole stars, **body** up to 2000 characters (optional). Moderated (`hiddenAt`) reviews are never listed.
+
+| Route | Who | Result |
+|---|---|---|
+| `GET /api/events/:id/reviews` | Anyone (published events) | `{ reviews, count, averageRating, viewer }`, newest first |
+| `POST /api/events/:id/reviews` | Signed-in attendee | 201; 403 `NOT_ATTENDED`; 409 `ALREADY_REVIEWED` |
+| `PATCH /api/events/:id/reviews/mine` | Author | 200; 404 `REVIEW_NOT_FOUND` |
+
+**UI:** `<EventReviews eventId />` (`src/features/reviews/event-reviews.tsx`) for Agent C's event page.
+It shows the average, the list with an empty state, a star-rating form for attendees (edit mode if
+they already posted), and plain messages for non-attendees and signed-out visitors.
+
+**When the table lands:** add a Prisma `ReviewStore` and swap `unavailableReviewStore` in
+`src/features/reviews/server.ts`. Nothing else changes.
