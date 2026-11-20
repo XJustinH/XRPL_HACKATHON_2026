@@ -257,3 +257,89 @@ describe('configuration', () => {
     ).toThrow();
   });
 });
+
+describe('XRPL-049 failures never create attendance records', () => {
+  type Case = { name: string; expected: string; run: (env: Env) => Promise<{ status: string }> };
+  const cases: Case[] = [
+    {
+      name: 'duplicate scan',
+      expected: 'ALREADY_USED',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        await env.svc.admit(scan(env, c.qrPayload));
+        env.store.records.clear(); // isolate the second attempt: it must not write either
+        env.store.challenges.get(c.challengeId)!.consumedAt = new Date();
+        return env.svc.admit(scan(env, c.qrPayload));
+      },
+    },
+    {
+      name: 'unrelated wallet approves',
+      expected: 'PROOF_REQUIRED',
+      run: async (env) => {
+        const c = await issue(env);
+        await env.svc.proveControl({ challengeId: c.challengeId, proof: FakeProofs.sign(BOB, c.messageToSign) });
+        return env.svc.admit(scan(env, c.qrPayload));
+      },
+    },
+    {
+      name: 'wrong event',
+      expected: 'WRONG_EVENT',
+      run: async (env) => {
+        env.organisers.grant(ORGANISER, OTHER_EVENT);
+        const c = await issueAndProve(env);
+        return env.svc.admit(scan(env, c.qrPayload, OTHER_EVENT));
+      },
+    },
+    {
+      name: 'expired QR',
+      expected: 'EXPIRED',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        env.clock.advance(60_000);
+        return env.svc.admit(scan(env, c.qrPayload));
+      },
+    },
+    {
+      name: 'externally transferred ticket',
+      expected: 'WRONG_OWNER',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        env.ledger.owners.set(NFT, BOB);
+        return env.svc.admit(scan(env, c.qrPayload));
+      },
+    },
+    {
+      name: 'ledger unavailable',
+      expected: 'LEDGER_UNAVAILABLE',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        env.ledger.down = true;
+        return env.svc.admit(scan(env, c.qrPayload));
+      },
+    },
+    {
+      name: 'not the organiser',
+      expected: 'NOT_AUTHORISED',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        return env.svc.admit(scan(env, c.qrPayload, EVENT, 'someone-else'));
+      },
+    },
+    {
+      name: 'tampered QR',
+      expected: 'INVALID_QR',
+      run: async (env) => {
+        const c = await issueAndProve(env);
+        return env.svc.admit(scan(env, c.qrPayload.slice(0, -2) + 'zz'));
+      },
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} -> ${c.expected}, no record`, async () => {
+      const env = setup();
+      expect(await c.run(env)).toMatchObject({ status: c.expected });
+      expect(env.store.records.size).toBe(0);
+    });
+  }
+});
