@@ -1,0 +1,152 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { AuthSession } from "@/lib/auth/session";
+import { getDb } from "@/lib/db/client";
+import { createXrplQueryService } from "@/lib/xrpl";
+import { reconcileTicketMint, requestTicketMint, type MintDeps } from "@/lib/xrpl/tickets/minting";
+import { createWalletTransactionRequests } from "@/lib/xrpl/wallet/transaction-requests";
+import { AutoApproveXaman } from "./support/auto-approve-xaman";
+import { fundTestWallet, openTestnet, type TestWallet } from "./support/testnet";
+import { waitFor } from "./support/wait";
+
+/**
+ * XRPL-050: the ticket lifecycle against live XRPL Testnet. Run on demand with `npm run test:testnet`
+ * (needs the internet and `npm run db:up`; never part of CI). See tests/testnet/README.md.
+ *
+ * Real: the app's services, the *_test database, XRPL Testnet and its faucet.
+ * Stood in for: the person approving in Xaman (AutoApproveXaman signs with a throwaway wallet), and
+ * the wallet sign-in proof (XRPL-012, covered by its own tests): the seller's session starts with
+ * the throwaway wallet as its proven wallet.
+ */
+
+const db = getDb();
+const { config, connection } = openTestnet();
+const ledger = createXrplQueryService(config);
+
+let seller: TestWallet;
+let xaman: AutoApproveXaman;
+let deps: MintDeps;
+let sellerId: string;
+let eventId: string;
+let tierId: string;
+
+beforeAll(async () => {
+  await db.$executeRawUnsafe(
+    `TRUNCATE "Session","CheckInRecord","CheckInChallenge","NFTOffer","LedgerTransaction","TicketNFT","TicketTier","Event","WalletLink","IdempotencyRecord","User" CASCADE`,
+  );
+
+  seller = await fundTestWallet(connection, config);
+  xaman = new AutoApproveXaman(connection, config.network, [seller]);
+  deps = {
+    db,
+    transactions: () => createWalletTransactionRequests(config, xaman, ledger),
+    ledger: () => ledger,
+    config,
+    // Metadata URIs written on Testnet point here. Not publicly reachable, which only affects how
+    // wallets and explorers display the NFT, not its validity.
+    baseUrl: "http://localhost:3000",
+  };
+
+  const user = await db.user.create({
+    data: { displayName: "Lifecycle test seller", role: "SELLER", onboardedAt: new Date() },
+  });
+  const event = await db.event.create({
+    data: {
+      sellerId: user.id,
+      title: "Lifecycle test event",
+      startsAt: new Date("2027-06-01T20:00:00.000Z"),
+      venue: "Test venue",
+      city: "Dublin",
+      status: "PUBLISHED",
+      publishedAt: new Date(),
+    },
+  });
+  const tier = await db.ticketTier.create({
+    data: { eventId: event.id, name: "General Admission", priceDrops: "1000000", totalSupply: 2 },
+  });
+  sellerId = user.id;
+  eventId = event.id;
+  tierId = tier.id;
+});
+
+afterAll(async () => {
+  await ledger.close();
+  await connection.disconnect();
+  await db.$disconnect();
+});
+
+/** A signed-in seller whose wallet control is already proven (XRPL-012 is tested separately). */
+function sellerSession(): AuthSession {
+  return {
+    sessionId: "lifecycle-test",
+    userId: sellerId,
+    displayName: "Lifecycle test seller",
+    role: "SELLER",
+    onboardedAt: new Date(),
+    isDemo: false,
+    method: "ONBOARDING",
+    expiresAt: new Date(Date.now() + 60 * 60_000),
+    walletAddress: seller.classicAddress,
+    walletVerifiedAt: new Date(),
+  };
+}
+
+describe("ticket lifecycle on XRPL Testnet (XRPL-050)", () => {
+  let ticketId: string;
+  let nftokenId: string;
+  let metadataUri: string;
+
+  it("mints a ticket NFT and records it only from the validated ledger outcome", async () => {
+    const { ticket } = await requestTicketMint(deps, { session: sellerSession(), eventId, tierId });
+    ticketId = ticket.id;
+    expect(xaman.approved).toHaveLength(1);
+    expect(xaman.approved[0]?.txjson).toMatchObject({
+      TransactionType: "NFTokenMint",
+      Account: seller.classicAddress,
+    });
+
+    const minted = await waitFor(
+      () => reconcileTicketMint(deps, ticketId),
+      (t) => t.mintStatus === "MINTED" || t.mintStatus === "FAILED",
+      { what: "the mint to reach a validated ledger" },
+    );
+    expect(minted.mintStatus).toBe("MINTED");
+    expect(minted.nftokenId).toMatch(/^[0-9A-F]{64}$/);
+    expect(minted.mintTxHash).toBe(xaman.approved[0]?.hash);
+    nftokenId = minted.nftokenId as string;
+    metadataUri = minted.metadataUri as string;
+
+    // The ledger itself confirms the mint.
+    const tx = await ledger.getValidatedTx(minted.mintTxHash as string);
+    expect(tx).toMatchObject({
+      validated: true,
+      result: "tesSUCCESS",
+      transactionType: "NFTokenMint",
+      account: seller.classicAddress,
+      nftokenId,
+    });
+
+    // Recorded exactly once, even when reconciled again.
+    await reconcileTicketMint(deps, ticketId);
+    const tier = await db.ticketTier.findUniqueOrThrow({ where: { id: tierId } });
+    expect(tier.mintedQuantity).toBe(1);
+    const recorded = await db.ledgerTransaction.findFirstOrThrow({ where: { relatedTicketId: ticketId } });
+    expect(recorded).toMatchObject({ status: "VALIDATED_SUCCESS", hash: minted.mintTxHash });
+    expect(recorded.appliedAt).not.toBeNull();
+  });
+
+  it("finds the minted ticket in the seller's wallet on the ledger", async () => {
+    const ownership = await ledger.verifyOwner(nftokenId, seller.classicAddress);
+
+    expect(ownership.owns).toBe(true);
+    expect(ownership.nft).toMatchObject({
+      issuer: seller.classicAddress,
+      transferable: true,
+      uri: metadataUri,
+    });
+  });
+
+  it.todo("lists the ticket with a primary sell offer (needs XRPL-029)");
+  it.todo("a buyer accepts the offer and becomes the owner on the ledger (needs XRPL-031)");
+  it.todo("the buyer resells the ticket or sends it privately to a friend (needs XRPL-036, XRPL-039, XRPL-040)");
+  it.todo("the current holder checks in once, and a second check-in is rejected (needs XRPL-045, XRPL-047)");
+});

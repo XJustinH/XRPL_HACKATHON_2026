@@ -11,6 +11,7 @@
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
     "test:db": "vitest run --project db",
+    "test:testnet": "vitest run --project testnet",
     "postinstall": "prisma generate",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",

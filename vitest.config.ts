@@ -21,7 +21,7 @@ export default defineConfig({
           globals: true,
           setupFiles: ["./vitest.setup.ts"],
           include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
-          exclude: ["**/*.int.test.ts", "node_modules/**"],
+          exclude: ["**/*.int.test.ts", "**/*.testnet.test.ts", "node_modules/**"],
         },
       },
       {
@@ -36,6 +36,22 @@ export default defineConfig({
           include: ["src/**/*.int.test.ts", "tests/**/*.int.test.ts"],
           globalSetup: ["./src/lib/db/test-global-setup.ts"],
           setupFiles: ["./src/lib/db/test-setup.ts"],
+          pool: "forks",
+          poolOptions: { forks: { singleFork: true } },
+        },
+      },
+      {
+        // Live XRPL Testnet (XRPL-050): `npm run test:testnet`, on demand only, never in CI.
+        // Needs the internet and the same *_test database as `db`, so don't run both at once.
+        extends: true,
+        test: {
+          name: "testnet",
+          environment: "node",
+          include: ["tests/testnet/**/*.testnet.test.ts"],
+          globalSetup: ["./src/lib/db/test-global-setup.ts"],
+          setupFiles: ["./src/lib/db/test-setup.ts"],
+          testTimeout: 180_000,
+          hookTimeout: 180_000,
           pool: "forks",
           poolOptions: { forks: { singleFork: true } },
         },
