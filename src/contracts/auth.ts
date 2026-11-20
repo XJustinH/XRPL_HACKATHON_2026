@@ -3,9 +3,8 @@ import { AppId, IsoDateTime, XrplAddress } from "./common";
 import { UserDto, UserRole, WalletLinkDto, XrplNetwork } from "./entities";
 
 /**
- * Sessions, onboarding, account and wallet sign-in contracts. Owner: Agent A.
- * XRPL-010 (sessions, onboarding), XRPL-012 (wallet-control proof).
- * Role enforcement (XRPL-013) extends this slice.
+ * Sessions, onboarding, account, wallet sign-in and permission contracts. Owner: Agent A.
+ * XRPL-010 (sessions, onboarding), XRPL-012 (wallet-control proof), XRPL-013 (permissions).
  */
 
 /** Error codes specific to this slice (cross-cutting codes live in common.ts). */
@@ -30,14 +29,35 @@ export const AuthErrorCode = {
   WALLET_KEY_UNSUPPORTED: "WALLET_KEY_UNSUPPORTED",
   /** 409: the wallet already belongs to another account. */
   WALLET_LINKED_TO_OTHER_ACCOUNT: "WALLET_LINKED_TO_OTHER_ACCOUNT",
+  // --- Permissions (XRPL-013) ---
+  /** 403: the account has not chosen a role yet (finish /onboarding). */
+  ONBOARDING_REQUIRED: "ONBOARDING_REQUIRED",
+  /** 403: the account's role may not do this (e.g. a customer creating an event). */
+  ROLE_REQUIRED: "ROLE_REQUIRED",
+  /** 403: only the event's owner may do this. */
+  NOT_EVENT_OWNER: "NOT_EVENT_OWNER",
+  /** 403: no wallet is proven for this session (connect with Xaman first). */
+  WALLET_NOT_VERIFIED: "WALLET_NOT_VERIFIED",
+  /** 403: the proven wallet does not hold this ticket on a validated ledger. */
+  NOT_TICKET_OWNER: "NOT_TICKET_OWNER",
+  /** 409: the ticket has no validated mint yet, so it has no on-chain owner. */
+  TICKET_NOT_MINTED: "TICKET_NOT_MINTED",
 } as const;
+
+/**
+ * Roles that may create and manage events (and run their gate scanner). Shared with the UI so
+ * navigation and server checks agree; the server check is what counts.
+ */
+export const EventManagerRole = UserRole.extract(["SELLER", "ORGANISER"]);
+export type EventManagerRole = z.infer<typeof EventManagerRole>;
+export const EVENT_MANAGER_ROLES: readonly EventManagerRole[] = EventManagerRole.options;
 
 /** How a session was established. Mirrors the Prisma `SessionMethod` enum. */
 export const SessionMethod = z.enum(["ONBOARDING", "DEMO_PERSONA", "WALLET"]);
 export type SessionMethod = z.infer<typeof SessionMethod>;
 
 /**
- * Roles a visitor may pick for themselves. ORGANISER (gate staff) is never
+ * Roles a visitor may pick for themselves. ORGANISER (an event manager like SELLER) is never
  * self-service: it is assigned through seeded demo accounts or an admin path.
  */
 export const SelfServeRole = UserRole.extract(["CUSTOMER", "SELLER"]);
