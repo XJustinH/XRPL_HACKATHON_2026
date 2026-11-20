@@ -15,5 +15,5 @@ Usage (server component): pass an offer from `listPrimaryOffers(db, eventId)` an
 <BuyTicket offer={offer} buyerAddress={session?.walletAddress ?? null} />
 ```
 
-It is currently shown on the public event page (`/events/:id`, Agent C's page) for the cheapest live offer of
-each tier. Agent C's checkout (XRPL-030) can move it into the ticket selection screens.
+It finishes the purchase on Agent C's purchase page (`/events/:id/purchase?tier=…`, XRPL-019), for the offer that
+page confirmed. Agent C's wallet readiness and fee estimate (XRPL-030) sit alongside it.

@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { EmptyState, NotImplementedNotice } from "@/components/ui/empty-state";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { getDb } from "@/lib/db/client";
 import { getPublishedEvent } from "@/features/events/event-store";
 import { eventPageReads } from "@/features/events/server-deps";
 import { formatEventDate, formatXrp, isPastEvent } from "@/features/events/event-formatting";
 import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
+import { BuyTicket } from "@/features/purchase/buy-ticket";
+import { getCurrentSession } from "@/lib/auth/current-session";
 
 export const metadata = { title: "Buy a ticket" };
 
@@ -35,9 +37,10 @@ export default async function PurchasePage({
   if (!event) notFound();
 
   const reads = eventPageReads();
-  const [availability, offers] = await Promise.all([
+  const [availability, offers, session] = await Promise.all([
     reads.availability(id).catch(() => null),
     reads.primaryOffers(id).catch(() => null),
+    getCurrentSession(),
   ]);
 
   const backToEvent = (
@@ -138,11 +141,9 @@ export default async function PurchasePage({
         </p>
       </section>
 
+      {/* Approval and acceptance with the buyer's wallet (XRPL-031, Agent B). */}
       <div className="mt-6 max-w-xl">
-        <NotImplementedNotice
-          title="Wallet approval and purchase"
-          blockedBy="XRPL-030 (wallet readiness and fee estimate) and XRPL-031 (accepting the offer with your wallet)"
-        />
+        <BuyTicket offer={selected.offer} buyerAddress={session?.walletAddress ?? null} />
       </div>
     </>
   );
