@@ -1,10 +1,11 @@
 import Link from "next/link";
 
 /** Switches between an event's organiser tools. */
-export function OrganiserEventTabs({ eventId, current }: { eventId: string; current: "inventory" | "checkin" }) {
+export function OrganiserEventTabs({ eventId, current }: { eventId: string; current: "inventory" | "checkin" | "analytics" }) {
   const tabs = [
     { key: "inventory", label: "Inventory", href: `/organiser/events/${eventId}/inventory` },
     { key: "checkin", label: "Check-in", href: `/organiser/events/${eventId}/checkin` },
+    { key: "analytics", label: "Analytics", href: `/organiser/events/${eventId}/analytics` },
   ] as const;
   return (
     <nav aria-label="Event tools" className="mb-6 flex flex-wrap gap-2">
