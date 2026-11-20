@@ -30,7 +30,16 @@ async function seed() {
   });
   const tier = await db.ticketTier.create({ data: { eventId: event.id, name: "GA", priceDrops: "1000000", totalSupply: 1 } });
   const ticket = await db.ticketNFT.create({
-    data: { eventId: event.id, tierId: tier.id, serial: 1, nftokenId: NFT, mintStatus: "MINTED" },
+    data: {
+      eventId: event.id,
+      tierId: tier.id,
+      serial: 1,
+      nftokenId: NFT,
+      mintStatus: "MINTED",
+      // A MINTED ticket must carry its validated mint identity (TicketNFT_minted_has_identity).
+      mintTxHash: "B".repeat(64),
+      mintedAt: new Date(),
+    },
   });
   return { organiser, event, ticket };
 }
