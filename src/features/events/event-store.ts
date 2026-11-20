@@ -1,0 +1,286 @@
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import type {
+  EventDraftInput,
+  EventView,
+  TicketTierInput,
+  TicketTierPatch,
+  TicketTierView,
+} from "@/contracts";
+
+/**
+ * Event and ticket-tier reads and writes for the seller management views
+ * (XRPL-015, XRPL-016).
+ *
+ * Returns `EventView`, the read model the UI renders, rather than raw rows. Any
+ * value the UI treats as derived — a tier's `remaining` and `locked` flags —
+ * is computed here so no component recalculates it.
+ *
+ * Primary sell-out state is **not** computed here: that is the live inventory
+ * calculation in XRPL-020, which also reconciles against the ledger.
+ */
+
+type EventDb = Pick<PrismaClient, "event">;
+
+/** Tiers are ordered by the seller's own ordering, then by age as a tiebreak. */
+const eventInclude = {
+  seller: { select: { id: true, displayName: true, role: true } },
+  tiers: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+} satisfies Prisma.EventInclude;
+
+/** The exact row shape `eventInclude` produces, inferred rather than restated. */
+type EventRow = Prisma.EventGetPayload<{ include: typeof eventInclude }>;
+
+function toTierView(tier: EventRow["tiers"][number]): TicketTierView {
+  /*
+   * `soldQuantity` stays 0 until primary sales are reconciled (XRPL-032). It is
+   * deliberately not inferred from `mintedQuantity`: a minted ticket is stock
+   * that exists on the ledger, not stock that someone has bought.
+   */
+  const soldQuantity = 0;
+  return {
+    id: tier.id,
+    eventId: tier.eventId,
+    name: tier.name,
+    description: tier.description,
+    priceDrops: tier.priceDrops,
+    totalSupply: tier.totalSupply,
+    mintedQuantity: tier.mintedQuantity,
+    soldQuantity,
+    remaining: Math.max(0, tier.totalSupply - soldQuantity),
+    locked: tier.mintedQuantity > 0,
+  };
+}
+
+export function toEventView(row: EventRow): EventView {
+  return {
+    id: row.id,
+    seller: {
+      id: row.seller.id,
+      displayName: row.seller.displayName,
+      city: null,
+      isVerified: false,
+    },
+    title: row.title,
+    description: row.description,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt?.toISOString() ?? null,
+    venue: row.venue,
+    city: row.city,
+    status: row.status,
+    artworkUrl: row.artworkUrl,
+    tiers: row.tiers.map(toTierView),
+    publishedAt: row.publishedAt?.toISOString() ?? null,
+  };
+}
+
+/**
+ * Creates an event owned by `sellerId`, always as a DRAFT.
+ *
+ * Publishing is a separate, validated transition (XRPL-017), so this never
+ * accepts a status from the caller. An empty `artworkUrl` is stored as null so
+ * "cleared" and "never set" are the same state.
+ */
+export async function createEventDraft(
+  db: EventDb,
+  sellerId: string,
+  input: EventDraftInput,
+): Promise<EventView> {
+  const row = await db.event.create({
+    data: {
+      sellerId,
+      title: input.title,
+      description: input.description,
+      startsAt: new Date(input.startsAt),
+      endsAt: input.endsAt ? new Date(input.endsAt) : null,
+      venue: input.venue,
+      city: input.city,
+      artworkUrl: input.artworkUrl?.trim() ? input.artworkUrl : null,
+      status: "DRAFT",
+    },
+    include: eventInclude,
+  });
+  return toEventView(row);
+}
+
+/** A single event with its tiers, regardless of status. Null when unknown. */
+export async function getEventView(db: EventDb, eventId: string): Promise<EventView | null> {
+  const row = await db.event.findUnique({ where: { id: eventId }, include: eventInclude });
+  return row ? toEventView(row) : null;
+}
+
+type TierDb = Pick<PrismaClient, "event" | "ticketTier" | "ticketNFT">;
+
+/** Raised when a tier change is refused by a domain rule, not by validation. */
+export class TierRuleError extends Error {
+  constructor(
+    readonly code:
+      | "DUPLICATE_TIER_NAME"
+      | "TIER_LOCKED"
+      | "SUPPLY_BELOW_MINTED"
+      | "TIER_HAS_TICKETS"
+      | "TIER_NOT_FOUND",
+    message: string,
+  ) {
+    super(message);
+    this.name = "TierRuleError";
+  }
+}
+
+/** Prisma's unique-constraint violation. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
+async function requireTier(db: TierDb, eventId: string, tierId: string) {
+  const tier = await db.ticketTier.findUnique({
+    where: { id: tierId },
+    select: { id: true, eventId: true, mintedQuantity: true },
+  });
+  // Checking the parent event prevents a tier being reached through an event
+  // the caller happens to own.
+  if (!tier || tier.eventId !== eventId) {
+    throw new TierRuleError("TIER_NOT_FOUND", "Ticket tier not found");
+  }
+  return tier;
+}
+
+/**
+ * Adds a ticket tier to an event.
+ *
+ * New tiers are appended after the existing ones so the seller's ordering is
+ * preserved without them having to supply a position.
+ */
+export async function addTier(
+  db: TierDb,
+  eventId: string,
+  input: TicketTierInput,
+): Promise<EventView> {
+  const last = await db.ticketTier.findFirst({
+    where: { eventId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+
+  try {
+    await db.ticketTier.create({
+      data: {
+        eventId,
+        name: input.name,
+        description: input.description,
+        priceDrops: input.priceDrops,
+        totalSupply: input.totalSupply,
+        sortOrder: input.sortOrder || (last ? last.sortOrder + 1 : 0),
+      },
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new TierRuleError(
+        "DUPLICATE_TIER_NAME",
+        `This event already has a tier called "${input.name}"`,
+      );
+    }
+    throw error;
+  }
+
+  const view = await getEventView(db, eventId);
+  if (!view) throw new TierRuleError("TIER_NOT_FOUND", "Event not found");
+  return view;
+}
+
+/**
+ * Edits a tier.
+ *
+ * Price and supply carry an on-ledger commitment once any ticket in the tier
+ * has been minted, so a locked tier rejects those two fields while still
+ * allowing the name and description to be corrected. Supply can be raised at
+ * any time but never dropped below what has already been minted.
+ */
+export async function updateTier(
+  db: TierDb,
+  eventId: string,
+  tierId: string,
+  input: TicketTierPatch,
+): Promise<EventView> {
+  const tier = await requireTier(db, eventId, tierId);
+  const locked = tier.mintedQuantity > 0;
+
+  if (locked && input.priceDrops !== undefined) {
+    throw new TierRuleError(
+      "TIER_LOCKED",
+      "This tier's price is fixed because tickets have already been minted",
+    );
+  }
+  if (input.totalSupply !== undefined && input.totalSupply < tier.mintedQuantity) {
+    throw new TierRuleError(
+      "SUPPLY_BELOW_MINTED",
+      `Quantity cannot be lower than the ${tier.mintedQuantity} ticket(s) already minted`,
+    );
+  }
+
+  try {
+    await db.ticketTier.update({
+      where: { id: tierId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.priceDrops !== undefined ? { priceDrops: input.priceDrops } : {}),
+        ...(input.totalSupply !== undefined ? { totalSupply: input.totalSupply } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+      },
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new TierRuleError(
+        "DUPLICATE_TIER_NAME",
+        `This event already has a tier called "${input.name}"`,
+      );
+    }
+    throw error;
+  }
+
+  const view = await getEventView(db, eventId);
+  if (!view) throw new TierRuleError("TIER_NOT_FOUND", "Event not found");
+  return view;
+}
+
+/**
+ * Removes a tier.
+ *
+ * Refused once any ticket row exists for it, including tickets that are still
+ * pending a mint: those rows are the record of an attempted on-ledger action
+ * and must not be orphaned.
+ */
+export async function removeTier(
+  db: TierDb,
+  eventId: string,
+  tierId: string,
+): Promise<EventView> {
+  await requireTier(db, eventId, tierId);
+
+  const ticketCount = await db.ticketNFT.count({ where: { tierId } });
+  if (ticketCount > 0) {
+    throw new TierRuleError(
+      "TIER_HAS_TICKETS",
+      "This tier cannot be removed because tickets have been created for it",
+    );
+  }
+
+  await db.ticketTier.delete({ where: { id: tierId } });
+  const view = await getEventView(db, eventId);
+  if (!view) throw new TierRuleError("TIER_NOT_FOUND", "Event not found");
+  return view;
+}
+
+/** Every event owned by a seller, soonest first, drafts included. */
+export async function listSellerEvents(db: EventDb, sellerId: string): Promise<EventView[]> {
+  const rows = await db.event.findMany({
+    where: { sellerId },
+    orderBy: [{ startsAt: "asc" }],
+    include: eventInclude,
+  });
+  return rows.map(toEventView);
+}
