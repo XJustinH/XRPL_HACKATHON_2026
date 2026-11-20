@@ -118,3 +118,35 @@ export type CheckInOverview = {
     scannedAt: IsoDateTime;
   }[];
 };
+
+// ---------------------------------------------------------------------------
+// Seller inventory (XRPL-021)
+// ---------------------------------------------------------------------------
+
+export type TierInventory = {
+  tierId: string;
+  name: string;
+  priceDrops: string;
+  /** Tickets offered in this tier. */
+  total: number;
+  /** Validated NFTokenMint. */
+  minted: number;
+  /** Mint requested or submitted but not yet validated. */
+  minting: number;
+  /** Minted, not yet sold, with a live primary sell offer on the ledger mirror. */
+  onSale: number;
+  /** Validated primary sale (NFTokenAcceptOffer). */
+  sold: number;
+  /** total - sold. */
+  unsold: number;
+};
+
+export type EventInventory = {
+  eventId: string;
+  tiers: TierInventory[];
+  totals: Omit<TierInventory, "tierId" | "name" | "priceDrops">;
+  /** Every tier has supply and every ticket has a validated primary sale. */
+  primarySoldOut: boolean;
+  checkedIn: number;
+  calculatedAt: IsoDateTime;
+};

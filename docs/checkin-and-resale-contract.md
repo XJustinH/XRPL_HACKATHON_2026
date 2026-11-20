@@ -134,4 +134,21 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 - **Overview:** entry count against minted tickets, plus the last 10 admissions (`GET /api/organisers/events/:id/checkins`).
 - **Linking:** nothing links to this page yet. Agent C's seller event management can link to it per event.
 
-Next for Agent D: the edge-case suite (XRPL-049).
+## Seller inventory (XRPL-021)
+
+`/organiser/events/:id/inventory` (event's seller only), linked from `/organiser/events` ("My events")
+and from the check-in screen's tabs.
+
+| Column | Counted from |
+|---|---|
+| Total | `TicketTier.totalSupply` |
+| Minted | `TicketNFT.mintStatus = MINTED` (validated mint) |
+| Minting | `mintStatus` `PENDING`/`SUBMITTED` (shown as a badge) |
+| On sale | minted, `primarySoldAt` null, with an `ACTIVE` `PRIMARY` offer |
+| Sold | `primarySoldAt` set (validated primary sale, XRPL-032) |
+| Unsold | total − sold |
+
+Everything is read on the server from records written only after a validated XRPL transaction, so a
+purchase appears once it is confirmed, never from optimistic client state. **Refresh** re-reads.
+"Primary sold out" here is a display figure. The resale rule uses Agent A's `InventoryPort` (XRPL-020).
+The handoff's `GET /api/events/:id/inventory` is Agent A's route; this page reads the same data directly.
