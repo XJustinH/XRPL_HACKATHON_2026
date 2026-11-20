@@ -57,6 +57,18 @@ function EventRow({ event }: { event: EventView }) {
           {event.tiers.length === 0 ? "Add tickets" : "Manage tickets"}
         </Link>
       </div>
+      {/* Agent D's organiser tools (XRPL-021, XRPL-048, XRPL-077). */}
+      <nav aria-label={`Organiser tools for ${event.title}`} className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <Link href={`/organiser/events/${event.id}/inventory`} className="font-medium text-accent hover:underline">
+          Inventory
+        </Link>
+        <Link href={`/organiser/events/${event.id}/checkin`} className="font-medium text-accent hover:underline">
+          Door check-in
+        </Link>
+        <Link href={`/organiser/events/${event.id}/analytics`} className="font-medium text-accent hover:underline">
+          Analytics
+        </Link>
+      </nav>
     </li>
   );
 }

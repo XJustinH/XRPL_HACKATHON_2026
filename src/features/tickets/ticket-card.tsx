@@ -69,6 +69,17 @@ export function TicketCard({ ticket }: { ticket: TicketView }) {
           ) : null}
         </div>
       </Link>
+      {/* Agent D (XRPL-044): the door code for a valid, unused ticket. Outside the card link on purpose. */}
+      {!checkedIn && !past ? (
+        <div className="border-t border-border px-4 py-3">
+          <Link
+            href={`/checkin/${ticket.id}`}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-semibold text-accent-ink hover:opacity-90"
+          >
+            Show check-in code
+          </Link>
+        </div>
+      ) : null}
     </article>
   );
 }

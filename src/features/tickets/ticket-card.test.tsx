@@ -50,7 +50,20 @@ describe("TicketCard", () => {
 
   it("links to the ticket's own page", () => {
     render(<TicketCard ticket={ticket({ id: "abc-123" })} />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/tickets/abc-123");
+    expect(screen.getByRole("link", { name: /Night Market Live/ })).toHaveAttribute("href", "/tickets/abc-123");
+  });
+
+  it("offers the check-in code for a valid, unused ticket (XRPL-044)", () => {
+    render(<TicketCard ticket={ticket({ id: "abc-123" })} />);
+    expect(screen.getByRole("link", { name: "Show check-in code" })).toHaveAttribute("href", "/checkin/abc-123");
+  });
+
+  it("does not offer a check-in code once used or after the event", () => {
+    const { unmount } = render(<TicketCard ticket={ticket({ checkedInAt: "2099-12-01T19:30:00.000Z" })} />);
+    expect(screen.queryByRole("link", { name: "Show check-in code" })).not.toBeInTheDocument();
+    unmount();
+    render(<TicketCard ticket={ticket({ event: { ...ticket().event, startsAt: "2020-01-01T20:00:00.000Z" } })} />);
+    expect(screen.queryByRole("link", { name: "Show check-in code" })).not.toBeInTheDocument();
   });
 
   it("marks an unused ticket for an upcoming event as valid", () => {
