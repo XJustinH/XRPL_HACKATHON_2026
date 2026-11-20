@@ -3,6 +3,7 @@ import type {
   Event,
   LedgerTransaction,
   NFTOffer,
+  Review,
   TicketNFT,
   TicketTier,
   User,
@@ -13,6 +14,7 @@ import type {
   EventDto,
   LedgerTransactionDto,
   NFTOfferDto,
+  ReviewDto,
   TicketDto,
   TicketTierDto,
   UserDto,
@@ -116,4 +118,16 @@ export const toCheckInRecordDto = (c: CheckInRecord): CheckInRecordDto => ({
   walletAddress: c.walletAddress,
   scannedAt: c.scannedAt.toISOString(),
   verifiedLedgerIndex: c.verifiedLedgerIndex,
+});
+
+export const toReviewDto = (r: Review): ReviewDto => ({
+  id: r.id,
+  eventId: r.eventId,
+  authorId: r.authorId,
+  rating: r.rating,
+  body: r.body,
+  checkInRecordId: r.checkInRecordId,
+  hiddenAt: iso(r.hiddenAt),
+  createdAt: r.createdAt.toISOString(),
+  updatedAt: r.updatedAt.toISOString(),
 });
