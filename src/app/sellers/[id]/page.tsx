@@ -1,0 +1,170 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import type { SellerProfile } from "@/contracts";
+import { NotImplementedNotice } from "@/components/ui/empty-state";
+import { getCurrentSession } from "@/lib/auth/current-session";
+import { getDb } from "@/lib/db/client";
+import { EventCard } from "@/features/events/event-card";
+import {
+  getSellerProfile,
+  listSellerStorefrontEvents,
+  ProfileNotFoundError,
+} from "@/features/profiles/profile-store";
+
+/**
+ * Public seller storefront (XRPL-055).
+ *
+ * One landing page for an artist, venue or organiser: who they are, what they
+ * have coming up, and where their merchandise will live.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const profile = await getSellerProfile(getDb(), id).catch(() => null);
+  return { title: profile?.displayName ?? "Seller" };
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function ProfileHeader({ profile }: { profile: SellerProfile }) {
+  return (
+    <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <div className="size-20 shrink-0 overflow-hidden rounded-full bg-surface">
+        {profile.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host
+          <img src={profile.imageUrl} alt="" className="size-full object-cover" />
+        ) : (
+          <div
+            aria-hidden="true"
+            className="grid size-full place-items-center text-2xl font-semibold text-muted"
+          >
+            {profile.displayName.slice(0, 1).toUpperCase()}
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+          {profile.displayName}
+        </h1>
+        <p className="mt-1 text-sm text-muted">
+          {profile.city ? `${profile.city} · ` : null}
+          {profile.publishedEventCount}{" "}
+          {profile.publishedEventCount === 1 ? "published event" : "published events"}
+        </p>
+        {profile.bio ? (
+          <p className="mt-3 max-w-2xl whitespace-pre-line text-sm">{profile.bio}</p>
+        ) : null}
+
+        {profile.websiteUrl || profile.socialLinks.length > 0 ? (
+          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {profile.websiteUrl ? (
+              <li>
+                <a
+                  href={profile.websiteUrl}
+                  target="_blank"
+                  rel="noreferrer noopener nofollow ugc"
+                  className="text-accent underline"
+                >
+                  {hostOf(profile.websiteUrl)}
+                </a>
+              </li>
+            ) : null}
+            {profile.socialLinks.map((link) => (
+              <li key={link.url}>
+                <a
+                  href={link.url}
+                  target="_blank"
+                  /* nofollow/ugc: these are user-submitted links. */
+                  rel="noreferrer noopener nofollow ugc"
+                  className="text-accent underline"
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+export default async function SellerStorefrontPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const db = getDb();
+
+  let profile: SellerProfile;
+  try {
+    profile = await getSellerProfile(db, id);
+  } catch (error) {
+    if (error instanceof ProfileNotFoundError) notFound();
+    throw error;
+  }
+
+  const [events, session] = await Promise.all([
+    listSellerStorefrontEvents(db, id),
+    getCurrentSession(),
+  ]);
+  const isOwnProfile = session?.userId === id;
+
+  return (
+    <>
+      <ProfileHeader profile={profile} />
+
+      {isOwnProfile ? (
+        <p className="mt-4">
+          <Link
+            href="/seller/profile"
+            className="inline-block rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:bg-surface"
+          >
+            Edit your profile
+          </Link>
+        </p>
+      ) : null}
+
+      <section aria-labelledby="events-heading" className="mt-10">
+        <h2 id="events-heading" className="text-lg font-semibold">
+          Upcoming events
+        </h2>
+        {events.length === 0 ? (
+          <p className="mt-4 rounded-card border border-dashed border-border bg-surface px-5 py-6 text-center text-sm text-muted">
+            No upcoming events on sale right now.
+          </p>
+        ) : (
+          <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {events.map((event) => (
+              <li key={event.id}>
+                <EventCard event={event} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="merch-heading" className="mt-10">
+        <h2 id="merch-heading" className="mb-4 text-lg font-semibold">
+          Merchandise
+        </h2>
+        <NotImplementedNotice
+          title="Merchandise and digital collectibles"
+          blockedBy="XRPL-064 to XRPL-066 (physical merchandise) and XRPL-070 to XRPL-074 (digital collectibles)"
+        />
+      </section>
+    </>
+  );
+}

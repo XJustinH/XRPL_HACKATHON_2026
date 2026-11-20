@@ -43,12 +43,24 @@ describe("EventCard", () => {
     expect(screen.getByText("Night Market Live")).toBeVisible();
     expect(screen.getByText(/1 Dec 2026/)).toBeVisible();
     expect(screen.getByText("Vicar Street, Dublin")).toBeVisible();
-    expect(screen.getByText("by Night Market")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Night Market" })).toBeVisible();
   });
 
   it("links to the matching event details page", () => {
     render(<EventCard event={event({ id: "abc-123" })} />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/events/abc-123");
+    expect(screen.getByRole("link", { name: /Night Market Live/ })).toHaveAttribute(
+      "href",
+      "/events/abc-123",
+    );
+  });
+
+  it("links the organiser to their storefront, outside the card link", () => {
+    // Nesting a link inside a link is invalid and unreachable by keyboard, so
+    // the two must be siblings.
+    render(<EventCard event={event()} />);
+    const sellerLink = screen.getByRole("link", { name: "Night Market" });
+    expect(sellerLink).toHaveAttribute("href", "/sellers/usr-1");
+    expect(sellerLink.closest("a[href^='/events/']")).toBeNull();
   });
 
   it("shows the cheapest tier as the starting price", () => {

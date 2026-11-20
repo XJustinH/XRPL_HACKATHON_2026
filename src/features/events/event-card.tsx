@@ -59,9 +59,20 @@ export function EventCard({ event }: { event: EventView }) {
             ) : null}
           </div>
 
-          <p className="mt-3 text-sm text-muted">by {event.seller.displayName}</p>
         </div>
       </Link>
+
+      {/* Outside the card link: a link inside a link is invalid and unreachable
+          by keyboard. */}
+      <p className="px-4 pb-4 text-sm text-muted">
+        by{" "}
+        <Link
+          href={`/sellers/${event.seller.id}`}
+          className="font-medium text-ink hover:text-accent hover:underline"
+        >
+          {event.seller.displayName}
+        </Link>
+      </p>
     </article>
   );
 }
