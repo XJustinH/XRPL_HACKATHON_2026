@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { AppId, IsoDateTime } from "./common";
-import { UserDto, UserRole, WalletLinkDto } from "./entities";
+import { AppId, IsoDateTime, XrplAddress } from "./common";
+import { UserDto, UserRole, WalletLinkDto, XrplNetwork } from "./entities";
 
 /**
- * Sessions, onboarding and account contracts (XRPL-010). Owner: Agent A.
- * Wallet-control proof (XRPL-012) and role enforcement (XRPL-013) extend this slice.
+ * Sessions, onboarding, account and wallet sign-in contracts. Owner: Agent A.
+ * XRPL-010 (sessions, onboarding), XRPL-012 (wallet-control proof).
+ * Role enforcement (XRPL-013) extends this slice.
  */
 
 /** Error codes specific to this slice (cross-cutting codes live in common.ts). */
@@ -13,10 +14,26 @@ export const AuthErrorCode = {
   ALREADY_ONBOARDED: "ALREADY_ONBOARDED",
   /** 403: role changes are not self-service. */
   ROLE_CHANGE_FORBIDDEN: "ROLE_CHANGE_FORBIDDEN",
+  /** 403: the wallet sign-in was started in a different browser. */
+  WALLET_PROOF_WRONG_BROWSER: "WALLET_PROOF_WRONG_BROWSER",
+  /** 410: the wallet sign-in request expired; start a new one. */
+  WALLET_PROOF_EXPIRED: "WALLET_PROOF_EXPIRED",
+  /** 409: the wallet sign-in request was already used. */
+  WALLET_PROOF_ALREADY_USED: "WALLET_PROOF_ALREADY_USED",
+  /** 409: the request is not signed (still open, declined, or signed on another network). */
+  WALLET_PROOF_NOT_SIGNED: "WALLET_PROOF_NOT_SIGNED",
+  /** 401: the signature could not be verified. */
+  WALLET_PROOF_INVALID: "WALLET_PROOF_INVALID",
+  /** 403: signed by a different wallet than the one requested. */
+  WALLET_MISMATCH: "WALLET_MISMATCH",
+  /** 422: regular-key or multi-signed accounts are not supported yet. */
+  WALLET_KEY_UNSUPPORTED: "WALLET_KEY_UNSUPPORTED",
+  /** 409: the wallet already belongs to another account. */
+  WALLET_LINKED_TO_OTHER_ACCOUNT: "WALLET_LINKED_TO_OTHER_ACCOUNT",
 } as const;
 
 /** How a session was established. Mirrors the Prisma `SessionMethod` enum. */
-export const SessionMethod = z.enum(["ONBOARDING", "DEMO_PERSONA"]);
+export const SessionMethod = z.enum(["ONBOARDING", "DEMO_PERSONA", "WALLET"]);
 export type SessionMethod = z.infer<typeof SessionMethod>;
 
 /**
@@ -58,6 +75,9 @@ export type OnboardingResponse = z.infer<typeof OnboardingResponse>;
 export const SessionInfo = z.object({
   method: SessionMethod,
   expiresAt: IsoDateTime,
+  /** Wallet whose control was proven in this session (XRPL-012); null if none. */
+  walletAddress: XrplAddress.nullable(),
+  walletVerifiedAt: IsoDateTime.nullable(),
 });
 export type SessionInfo = z.infer<typeof SessionInfo>;
 
@@ -101,3 +121,46 @@ export type DemoPersonasResponse = z.infer<typeof DemoPersonasResponse>;
 /** POST /api/auth/demo-session */
 export const DemoSessionRequest = z.object({ userId: AppId }).strict();
 export type DemoSessionRequest = z.infer<typeof DemoSessionRequest>;
+
+// ---------------------------------------------------------------------------
+// Wallet sign-in (XRPL-012)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/auth/challenge — start a wallet sign-in. `kind` is accepted so the wallet
+ * UI can send the same body it sends to /api/wallet/sign-requests. With `address`, only
+ * that wallet may complete the proof (WALLET_MISMATCH otherwise).
+ * 201 { data: SignRequest } (src/contracts/xrpl.ts) + an httpOnly binding cookie.
+ */
+export const WalletChallengeRequest = z
+  .object({
+    kind: z.literal("SIGN_IN").optional(),
+    address: XrplAddress.optional(),
+  })
+  .strict();
+export type WalletChallengeRequest = z.infer<typeof WalletChallengeRequest>;
+
+/** POST /api/auth/verify — complete a signed wallet sign-in from the same browser. */
+export const WalletVerifyRequest = z.object({ signRequestId: z.uuid() }).strict();
+export type WalletVerifyRequest = z.infer<typeof WalletVerifyRequest>;
+
+export const VerifiedWallet = z.object({
+  address: XrplAddress,
+  network: XrplNetwork,
+  verifiedAt: IsoDateTime,
+});
+export type VerifiedWallet = z.infer<typeof VerifiedWallet>;
+
+/** 201 when a new wallet-first account was created, 200 otherwise. */
+export const WalletVerifyResponse = z.object({
+  user: UserDto,
+  wallet: VerifiedWallet,
+  /** True until the user picks a role at /onboarding. */
+  needsOnboarding: z.boolean(),
+  newAccount: z.boolean(),
+});
+export type WalletVerifyResponse = z.infer<typeof WalletVerifyResponse>;
+
+/** POST /api/auth/logout — body optional. `forgetWallet` also unlinks this session's wallet. */
+export const LogoutRequest = z.object({ forgetWallet: z.boolean().optional() }).strict();
+export type LogoutRequest = z.infer<typeof LogoutRequest>;

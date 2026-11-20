@@ -13,8 +13,8 @@ import { parseCookieHeader, serializeCookie, type CookieOptions } from "./cookie
  * - Cookies are HttpOnly + SameSite=Lax, and Secure (with the `__Host-` prefix) when
  *   APP_BASE_URL is https. Mutations are additionally same-origin checked by
  *   `withApiHandler`.
- * - A session does NOT prove wallet control. `walletAddress` is only set from a
- *   WalletLink verified by a wallet-signed challenge (XRPL-012).
+ * - A session does NOT prove wallet control by itself. `walletAddress` comes only from a
+ *   wallet-signed proof verified by the server (XRPL-012, see wallet-proof.ts).
  */
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -30,8 +30,13 @@ export type AuthSession = {
   isDemo: boolean;
   method: SessionMethod;
   expiresAt: Date;
-  /** Most recently verified, unrevoked wallet. Null means wallet control is not proven. */
+  /**
+   * The account's proven wallet (XRPL-012): proven in this session, or (real accounts only)
+   * verified earlier and still linked. Demo personas count only a proof made in this session.
+   * Null means wallet control is not proven.
+   */
   walletAddress: string | null;
+  walletVerifiedAt: Date | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -87,6 +92,33 @@ export function readSessionToken(req: Request): string | null {
   return parseCookieHeader(req.headers.get("cookie")).get(sessionCookieName()) ?? null;
 }
 
+// Wallet sign-in binding cookie (XRPL-012): ties a wallet proof to the browser that started it.
+// Scoped to /api/auth so it is only sent to the challenge/verify endpoints.
+const WALLET_PROOF_COOKIE_PATH = "/api/auth";
+
+export function walletProofCookieName(secure = cookieIsSecure()): string {
+  return secure ? "__Secure-xt_wallet_proof" : "xt_wallet_proof";
+}
+
+export function walletProofSetCookie(token: string, expiresAt: Date): string {
+  return serializeCookie(walletProofCookieName(), token, {
+    ...sessionCookieOptions(expiresAt),
+    path: WALLET_PROOF_COOKIE_PATH,
+  });
+}
+
+export function walletProofClearCookie(): string {
+  return serializeCookie(walletProofCookieName(), "", {
+    ...sessionCookieOptions(new Date(0)),
+    path: WALLET_PROOF_COOKIE_PATH,
+    maxAge: 0,
+  });
+}
+
+export function readWalletProofToken(req: Request): string | null {
+  return parseCookieHeader(req.headers.get("cookie")).get(walletProofCookieName()) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
@@ -96,11 +128,21 @@ export async function createSession(
   userId: string,
   method: SessionMethod,
   now = new Date(),
+  /** Only for a session established by a just-verified wallet proof (XRPL-012). */
+  provenWallet?: { address: string },
 ): Promise<{ token: string; expiresAt: Date; sessionId: string }> {
   const token = newSessionToken();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   const row = await db.session.create({
-    data: { userId, method, tokenHash: hashSessionToken(token), createdAt: now, expiresAt },
+    data: {
+      userId,
+      method,
+      tokenHash: hashSessionToken(token),
+      createdAt: now,
+      expiresAt,
+      walletAddress: provenWallet?.address ?? null,
+      walletVerifiedAt: provenWallet ? now : null,
+    },
   });
   return { token, expiresAt, sessionId: row.id };
 }
@@ -127,6 +169,10 @@ export async function findSessionByToken(
     },
   });
   if (!row || row.revokedAt || row.expiresAt <= now) return null;
+
+  // A proof made in this session wins. Otherwise a real account keeps its verified, still-linked
+  // wallet (the XRPL-010 contract). A shared demo persona never inherits someone else's proof.
+  const linked = row.user.isDemo ? undefined : row.user.wallets[0];
   return {
     sessionId: row.id,
     userId: row.userId,
@@ -136,7 +182,8 @@ export async function findSessionByToken(
     isDemo: row.user.isDemo,
     method: row.method,
     expiresAt: row.expiresAt,
-    walletAddress: row.user.wallets[0]?.address ?? null,
+    walletAddress: row.walletAddress ?? linked?.address ?? null,
+    walletVerifiedAt: row.walletVerifiedAt ?? linked?.verifiedAt ?? null,
   };
 }
 

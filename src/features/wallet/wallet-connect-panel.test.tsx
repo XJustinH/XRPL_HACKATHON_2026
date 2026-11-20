@@ -7,6 +7,9 @@ import type { SignRequest, SignRequestStatus } from "@/contracts/xrpl";
 import { WalletConnectPanel } from "./wallet-connect-panel";
 import { resetConnectedWalletCache } from "./wallet-store";
 
+const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
+
 const UUID = "515b9d76-f7cc-4f3b-979e-a82500340424";
 const ADDRESS = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
 const STORAGE_KEY = "xrpl-ticketing.connected-wallet";
@@ -43,20 +46,31 @@ const envelope = (data: unknown, status = 200) =>
   });
 
 /** Fake backend: `poll` answers each status check in turn (the last answer repeats). */
+const VERIFIED = {
+  user: { id: "6f1c1f3e-2b8a-4d6c-9a51-1f8f0d2b7c11", role: "CUSTOMER", displayName: "Aoife", onboardedAt: "2026-11-20T18:00:00.000Z" },
+  wallet: { address: ADDRESS, network: "TESTNET", verifiedAt: "2026-11-20T18:31:00.000Z" },
+  needsOnboarding: false,
+  newAccount: false,
+};
+
 function mockApi({
   create = () => envelope(signRequest("PENDING"), 201),
   poll = [SIGNED_OK],
   cancel = () => envelope(signRequest("CANCELLED")),
+  verify = () => envelope(VERIFIED),
 }: {
   create?: () => Response;
   poll?: SignRequest[];
   cancel?: () => Response;
+  verify?: () => Response;
 }) {
   const answers = [...poll];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (url === "/api/wallet/sign-requests" && method === "POST") return create();
+    if ((url === "/api/auth/challenge" || url === "/api/wallet/sign-requests") && method === "POST") return create();
+    if (url === "/api/auth/verify" && method === "POST") return verify();
+    if (url === "/api/auth/logout" && method === "POST") return envelope({ signedOut: true });
     if (url.startsWith("/api/wallet/sign-requests/") && method === "DELETE") return cancel();
     if (url.startsWith("/api/wallet/sign-requests/")) {
       return envelope(answers.length > 1 ? answers.shift() : answers[0]);
@@ -72,6 +86,8 @@ describe("WalletConnectPanel", () => {
   beforeEach(() => {
     window.localStorage.clear();
     resetConnectedWalletCache();
+    router.push.mockReset();
+    router.refresh.mockReset();
   });
 
   afterEach(() => {
@@ -109,8 +125,8 @@ describe("WalletConnectPanel", () => {
     });
   });
 
-  it("disconnects by forgetting the wallet in this browser", async () => {
-    mockApi({});
+  it("disconnects by signing out and forgetting the wallet in this browser", async () => {
+    const fetchMock = mockApi({});
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ address: ADDRESS, network: "TESTNET", connectedAt: "2026-11-20T18:00:00.000Z" }),
@@ -122,6 +138,8 @@ describe("WalletConnectPanel", () => {
     expect(screen.getByRole("button", { name: "Connect with Xaman" })).toBeVisible();
     expect(screen.queryByText(ADDRESS)).not.toBeInTheDocument();
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
+    expect(router.refresh).toHaveBeenCalled();
   });
 
   it("shows the developer transaction check only when the server enables it", async () => {
@@ -180,5 +198,75 @@ describe("WalletConnectPanel", () => {
     render(<WalletConnectPanel pollIntervalMs={5} />);
     await userEvent.click(screen.getByRole("button", { name: "Connect with Xaman" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Wallet sign-in isn't available right now");
+  });
+
+  describe("server-side proof (XRPL-012)", () => {
+    it("starts at /api/auth/challenge and proves the signed request before showing it as connected", async () => {
+      const fetchMock = mockApi({});
+      render(<WalletConnectPanel pollIntervalMs={5} />);
+      await userEvent.click(screen.getByRole("button", { name: "Connect with Xaman" }));
+
+      expect(await screen.findByText(ADDRESS)).toBeVisible();
+      expect(fetchMock).toHaveBeenCalledWith("/api/auth/challenge", expect.objectContaining({ method: "POST" }));
+      const verifyCall = fetchMock.mock.calls.find(([url]) => url === "/api/auth/verify");
+      expect(JSON.parse(String(verifyCall?.[1]?.body))).toEqual({ signRequestId: UUID });
+      expect(router.refresh).toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    });
+
+    it("sends a new wallet-first account to onboarding to choose a role", async () => {
+      mockApi({ verify: () => envelope({ ...VERIFIED, needsOnboarding: true, newAccount: true }, 201) });
+      render(<WalletConnectPanel pollIntervalMs={5} />);
+      await userEvent.click(screen.getByRole("button", { name: "Connect with Xaman" }));
+      await screen.findByText(ADDRESS);
+      expect(router.push).toHaveBeenCalledWith("/onboarding");
+    });
+
+    it("explains why the server refused the wallet and stays disconnected", async () => {
+      mockApi({
+        verify: () =>
+          envelope(
+            {
+              error: {
+                code: "WALLET_LINKED_TO_OTHER_ACCOUNT",
+                message: "This wallet is linked to another account. Sign out, then sign in with the wallet.",
+              },
+              requestId: "r",
+            },
+            409,
+          ),
+      });
+      render(<WalletConnectPanel pollIntervalMs={5} />);
+      await userEvent.click(screen.getByRole("button", { name: "Connect with Xaman" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("linked to another account");
+      expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+      expect(screen.queryByText(ADDRESS)).not.toBeInTheDocument();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
+    it("trusts the server over a stale copy in this browser", () => {
+      mockApi({});
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ address: ADDRESS, network: "TESTNET", connectedAt: "2026-11-20T18:00:00.000Z" }),
+      );
+      render(<WalletConnectPanel pollIntervalMs={5} verifiedWallet={null} />);
+      expect(screen.getByRole("button", { name: "Connect with Xaman" })).toBeVisible();
+      expect(screen.queryByText(ADDRESS)).not.toBeInTheDocument();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
+    it("shows the wallet the server proved for this session", async () => {
+      mockApi({});
+      render(
+        <WalletConnectPanel
+          pollIntervalMs={5}
+          verifiedWallet={{ address: ADDRESS, network: "TESTNET", connectedAt: "2026-11-20T18:31:00.000Z" }}
+        />,
+      );
+      expect(await screen.findByText(ADDRESS)).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Wallet connected" })).toBeVisible();
+    });
   });
 });

@@ -52,9 +52,12 @@ const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 export function useSignIn({
   onConnected,
   pollIntervalMs = 2000,
+  startUrl = "/api/wallet/sign-requests",
 }: {
   onConnected: (request: SignRequest & { account: string }) => void;
   pollIntervalMs?: number;
+  /** Endpoint that creates the sign-in request. `/api/auth/challenge` also binds it to this browser (XRPL-012). */
+  startUrl?: string;
 }) {
   const [state, setState] = useState<SignInState>({ phase: "idle" });
   const activeId = useRef<string | null>(null);
@@ -106,7 +109,7 @@ export function useSignIn({
     activeId.current = null;
     setState({ phase: "starting" });
     try {
-      const request = await callApi("/api/wallet/sign-requests", {
+      const request = await callApi(startUrl, {
         method: "POST",
         body: JSON.stringify({ kind: "SIGN_IN" }),
       });
@@ -116,7 +119,7 @@ export function useSignIn({
     } catch (error) {
       setState({ phase: "error", message: messageFor(error) });
     }
-  }, [pollUntilAnswered]);
+  }, [pollUntilAnswered, startUrl]);
 
   const cancel = useCallback(async () => {
     const id = activeId.current;

@@ -25,11 +25,12 @@ Without credentials the wallet routes answer `503 SERVICE_UNAVAILABLE` and the s
 
 ```text
 Browser (/connect)          App API                          Xaman
-  Connect ------------->  POST /api/wallet/sign-requests --> create SignIn payload
-                          (force_network = TESTNET, 5 min)
+  Connect ------------->  POST /api/auth/challenge --------> create SignIn payload
+                          (XRPL-012: binds it to this browser; force_network = TESTNET, 5 min)
   shows QR / "Open in Xaman"            user scans and approves in the Xaman app
   polls --------------->  GET /api/wallet/sign-requests/:id -> payload status
-  SIGNED + networkMatches -> stores the public address in this browser
+  SIGNED + networkMatches -> POST /api/auth/verify: server verifies the signature, signs in,
+                             then the public address is also stored in this browser
 ```
 
 - A **sign-in** (Xaman's `SignIn` pseudo-transaction) proves which account the user controls. It moves
@@ -37,9 +38,10 @@ Browser (/connect)          App API                          Xaman
 - Requests are pinned to the app's network with Xaman's `force_network`. If a wallet still signs on
   another network, the request is reported with `networkMatches: false`. The UI then refuses to
   connect and tells the user to switch networks in Xaman.
-- **Disconnect** forgets the address in this browser. Nothing is stored server-side.
-- Linking the wallet to a user account (sessions, verified signature) is **XRPL-012 (Agent A)**. The
-  signed blob carries Xaman's sign-in memo with the request ID; `getSignedSignIn(id)` in
+- **Disconnect** signs out and forgets the address in this browser.
+- Linking the wallet to a user account (sessions, verified signature) is **XRPL-012 (Agent A)**:
+  see [docs/auth/wallet-sign-in.md](../auth/wallet-sign-in.md). The signed blob carries Xaman's
+  `xaman-signin` memo with the request ID; `getSignedSignIn(id)` in
   `src/lib/xrpl/wallet/sign-requests.ts` returns it for a signed request on the right network.
 
 ## API

@@ -124,22 +124,55 @@ enum SessionMethod {
   ONBOARDING
   /// Assumed a seeded demo persona (demo login enabled only).
   DEMO_PERSONA
+  /// Signed in by proving control of an XRPL wallet (XRPL-012).
+  WALLET
 }
 
 /// Server-side session (XRPL-010). The browser cookie holds a random 256-bit token;
 /// only its SHA-256 hash is stored, so a database read does not yield usable cookies.
 model Session {
-  id        String        @id @default(uuid()) @db.Uuid
-  userId    String        @db.Uuid
-  tokenHash String        @unique
-  method    SessionMethod
-  createdAt DateTime      @default(now()) @db.Timestamptz(3)
-  expiresAt DateTime      @db.Timestamptz(3)
-  revokedAt DateTime?     @db.Timestamptz(3)
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid
+  tokenHash        String        @unique
+  method           SessionMethod
+  /// Wallet whose control was proven IN THIS SESSION (XRPL-012). Null = no proof yet.
+  /// Session-scoped on purpose: a shared demo persona never inherits someone else's proof.
+  walletAddress    String?
+  walletVerifiedAt DateTime?     @db.Timestamptz(3)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  expiresAt        DateTime      @db.Timestamptz(3)
+  revokedAt        DateTime?     @db.Timestamptz(3)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletProofs WalletProof[]
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+/// A wallet sign-in proof request (XRPL-012), created by this server through the wallet
+/// provider (a Xaman SignIn). Single-use and short-lived, and bound to the browser that asked
+/// for it: only the SHA-256 of a random token held in that browser's httpOnly cookie is stored.
+/// The signed blob itself carries the provider request ID (memo `xaman-signin`).
+model WalletProof {
+  id               String      @id @default(uuid()) @db.Uuid
+  /// Wallet provider request ID (Xaman payload UUID), also embedded in the signed blob's memo.
+  signRequestId    String      @unique
+  network          XrplNetwork @default(TESTNET)
+  /// SHA-256 (hex) of the random token in the requesting browser's httpOnly cookie.
+  browserTokenHash String
+  /// When set, only this address may complete the proof.
+  requestedAddress String?
+  /// Session that requested it, if any (audit only; binding uses browserTokenHash).
+  sessionId        String?     @db.Uuid
+  /// Address that signed, recorded when the proof is consumed.
+  signerAddress    String?
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+  expiresAt        DateTime    @db.Timestamptz(3)
+  consumedAt       DateTime?   @db.Timestamptz(3)
+
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
   @@index([expiresAt])
 }
 
