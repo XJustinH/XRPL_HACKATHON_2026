@@ -1,10 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CheckInService } from "@/features/checkin/checkin-service";
+import { EventSellerAccess } from "@/features/checkin/organiser-access";
+import { PrismaCheckInStore, PrismaTicketDirectory } from "@/features/checkin/prisma-store";
+import { XamanCheckInProofs } from "@/features/checkin/xaman-proof";
+import { XrplLedgerOwnership } from "@/features/checkin/xrpl-ownership";
 import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { createXrplQueryService } from "@/lib/xrpl";
 import { listPrimaryOffers, reconcilePrimaryOffer, requestPrimaryOffer, type OfferDeps } from "@/lib/xrpl/offers/primary";
 import { getOfferStatus, requestPurchase, type PurchaseDeps } from "@/lib/xrpl/offers/purchase";
 import { reconcileTicketMint, requestTicketMint, type MintDeps } from "@/lib/xrpl/tickets/minting";
+import { createWalletSignRequests, type WalletSignRequests } from "@/lib/xrpl/wallet/sign-requests";
 import { createWalletTransactionRequests } from "@/lib/xrpl/wallet/transaction-requests";
 import { AutoApproveXaman } from "./support/auto-approve-xaman";
 import { fundTestWallet, openTestnet, type TestWallet } from "./support/testnet";
@@ -23,6 +29,9 @@ import { waitFor } from "./support/wait";
 const db = getDb();
 const { config, connection } = openTestnet();
 const ledger = createXrplQueryService(config);
+// Test-only signing keys for check-in codes and wallet-approval tokens (32+ bytes, not real secrets).
+const CHECKIN_QR_SECRET = "lifecycle-test-checkin-qr-secret-0123456789";
+const CHECKIN_PROOF_SECRET = "lifecycle-test-checkin-proof-secret-0123456789";
 
 let seller: TestWallet;
 let buyer: TestWallet;
@@ -30,6 +39,9 @@ let xaman: AutoApproveXaman;
 let deps: MintDeps;
 let offerDeps: OfferDeps;
 let purchaseDeps: PurchaseDeps;
+let signRequests: WalletSignRequests;
+let proofs: XamanCheckInProofs;
+let checkIn: CheckInService;
 let sellerId: string;
 let buyerId: string;
 let eventId: string;
@@ -54,6 +66,19 @@ beforeAll(async () => {
   };
   offerDeps = { db, transactions: deps.transactions, ledger: () => ledger, config };
   purchaseDeps = { db, transactions: deps.transactions, ledger: () => ledger, config };
+  // The check-in service as the app wires it (src/features/checkin/server.ts), with the test double as Xaman.
+  signRequests = createWalletSignRequests(config, xaman);
+  proofs = new XamanCheckInProofs(() => signRequests, CHECKIN_PROOF_SECRET);
+  checkIn = new CheckInService(
+    {
+      tickets: new PrismaTicketDirectory(db),
+      organisers: new EventSellerAccess(db),
+      ledger: new XrplLedgerOwnership({ verifyOwner: (nftId, address) => ledger.verifyOwner(nftId, address) }),
+      proofs,
+      store: new PrismaCheckInStore(db),
+    },
+    { qrSecret: CHECKIN_QR_SECRET },
+  );
 
   const user = await db.user.create({
     data: { displayName: "Lifecycle test seller", role: "SELLER", onboardedAt: new Date() },
@@ -260,5 +285,48 @@ describe("ticket lifecycle on XRPL Testnet (XRPL-050)", () => {
   });
 
   it.todo("the buyer resells the ticket or sends it privately to a friend (needs XRPL-036, XRPL-039, XRPL-040)");
-  it.todo("the current holder checks in once, and a second check-in is rejected (needs XRPL-045, XRPL-047)");
+  it("the current holder checks in once, and every later attempt is rejected", async () => {
+    // The seller no longer holds the ticket, so the ledger refuses them a check-in code.
+    await expect(checkIn.issueChallenge({ ticketId, walletAddress: seller.classicAddress })).resolves.toMatchObject({
+      status: "WRONG_OWNER",
+    });
+
+    // The holder (the buyer) gets a code for the ticket.
+    const issued = await checkIn.issueChallenge({ ticketId, walletAddress: buyer.classicAddress });
+    if ("status" in issued) throw new Error(`No check-in code: ${issued.status} ${issued.message}`);
+    const { challengeId, qrPayload } = issued;
+
+    // A sign-in by any other wallet can't approve it.
+    xaman.signInAs(seller);
+    const wrongSignIn = await signRequests.createSignIn();
+    await expect(
+      checkIn.proveControl({ challengeId, proof: proofs.tokenFor(challengeId, wrongSignIn.id) }),
+    ).resolves.toMatchObject({ status: "INVALID_PROOF" });
+
+    // The holder approves it in their wallet, proving they control the wallet that holds the NFT.
+    xaman.signInAs(buyer);
+    const signIn = await signRequests.createSignIn();
+    await expect(
+      checkIn.proveControl({ challengeId, proof: proofs.tokenFor(challengeId, signIn.id) }),
+    ).resolves.toMatchObject({ status: "PROVEN" });
+
+    // The organiser (the event's seller) scans: ownership is read from the ledger again, then admitted once.
+    const scan = { qrPayload, organiserId: sellerId, gateEventId: eventId };
+    await expect(checkIn.verifyScan(scan)).resolves.toMatchObject({
+      status: "VERIFIED",
+      ticketId,
+      nftokenId,
+      ownerAddress: buyer.classicAddress,
+    });
+    await expect(checkIn.admit(scan)).resolves.toMatchObject({ status: "ADMITTED", ticketId });
+
+    // The same code again, or a new code for the same ticket, is refused.
+    await expect(checkIn.admit(scan)).resolves.toMatchObject({ status: "ALREADY_USED" });
+    await expect(checkIn.issueChallenge({ ticketId, walletAddress: buyer.classicAddress })).resolves.toMatchObject({
+      status: "ALREADY_USED",
+    });
+    const records = await db.checkInRecord.findMany({ where: { ticketId } });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ walletAddress: buyer.classicAddress, organiserId: sellerId });
+  });
 });

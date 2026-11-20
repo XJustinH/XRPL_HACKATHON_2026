@@ -24,7 +24,7 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 | List the ticket for sale at its tier price. The offer becomes `ACTIVE` only once validated, the ledger shows the same open sell offer (seller, price, no destination), and it appears in the event's public listing | Runs |
 | A buyer accepts the offer with their own wallet. Recorded as sold, with the buyer as owner, only from the validated ledger result. On the ledger the buyer holds the NFT, the seller doesn't, and the offer is gone. The ticket leaves the public listing | Runs |
 | Resale or private transfer to a friend | To do: needs XRPL-036, XRPL-039, XRPL-040 |
-| The holder checks in once, and a second check-in is rejected | To do: needs XRPL-045, XRPL-047 |
+| The holder checks in. The seller (no longer the holder) is refused a code, and a sign-in by the wrong wallet is rejected. The holder approves with their own wallet, and the organiser's scan re-reads the ledger and admits once. The same code or a new code is then refused, and exactly one check-in record exists | Runs |
 
 The test waits for each validated ledger outcome by polling until it is final (`support/wait.ts`), never
 for a fixed time.
@@ -32,9 +32,11 @@ for a fixed time.
 ## What is real and what is simulated
 
 - **Real:** the app's services and database code, XRPL Testnet, and the faucet.
-- **Simulated: the person approving in Xaman.** `support/auto-approve-xaman.ts` takes Xaman's place. It
-  approves each request by signing exactly the transaction the server built (adding only fee, sequence
-  and expiry, as Xaman does) with a throwaway wallet, then submits it.
+- **Simulated: the person approving in Xaman.** `support/auto-approve-xaman.ts` takes Xaman's place.
+  - For transactions, it signs exactly what the server built (adding only fee, sequence and expiry, as
+    Xaman does) with a throwaway wallet, then submits it.
+  - For sign-ins (wallet-control proof at check-in), it returns a sign-in signed by the chosen wallet's
+    own key, which the app verifies with its real signature check.
 - **Simulated: the wallet sign-in proof (XRPL-012).** That has its own tests. Here the seller's session
   starts with the throwaway wallet as its proven wallet.
 
@@ -47,5 +49,5 @@ affects how explorers display the NFTs.
 
 - **A step that needs another person's wallet**: fund another wallet with `fundTestWallet()` and pass it to
   `AutoApproveXaman`, which signs for any wallet it was given (the purchase step does this for the buyer).
-- **Check-in** proves wallet control with a Xaman sign-in rather than a transaction. The double will need
-  to answer sign-in requests too.
+- **A sign-in step:** call `xaman.signInAs(wallet)` first. In Xaman a person picks the account, so the
+  request itself names none.
