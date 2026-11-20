@@ -98,3 +98,23 @@ export const RESALE_LIMITATION_NOTICE =
   "Resale tickets are only listed in this app once every primary ticket has sold. " +
   "This is an app rule: ticket NFTs are transferable, so holders can still sell or " +
   "transfer them directly on the XRP Ledger outside this app.";
+
+// ---------------------------------------------------------------------------
+// Organiser overview (XRPL-048)
+// ---------------------------------------------------------------------------
+
+/** GET /api/organisers/events/:id/checkins */
+export type CheckInOverview = {
+  eventId: string;
+  /** Tickets with a validated mint for this event. */
+  mintedTickets: number;
+  admitted: number;
+  /** Most recent admissions first. */
+  recent: {
+    ticketId: string;
+    serial: number;
+    tierName: string;
+    walletAddress: XrplAddress;
+    scannedAt: IsoDateTime;
+  }[];
+};

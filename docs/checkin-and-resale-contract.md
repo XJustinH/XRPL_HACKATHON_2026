@@ -126,4 +126,13 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 | Wallet proof | `unavailableProofs` → 503 | Agent A/B verifier (XRPL-012) |
 | QR key | `CHECKIN_QR_SECRET`, else derived from `SESSION_SECRET`, else (dev only) random per process | — |
 
-Next for Agent D: the organiser scanner UI (XRPL-048) and the edge-case suite (XRPL-049).
+## Organiser gate screen (XRPL-048)
+
+`/organiser/events/:id/checkin`, for the event's organiser only (interim: its seller).
+
+- **Scanning:** the phone camera is offered where the browser can read QR codes itself (`BarcodeDetector`, e.g. Chrome on Android). The text box always works, including handheld scanners that type the code and press Enter. No extra library is added.
+- **Flow:** scan → `POST /api/checkin/verify` → green "Valid ticket" with an **Admit** button → `POST /api/checkin/confirm` → "Admitted" → "Scan next ticket". Every failure is shown as red "do not admit" or amber "try again" (ledger unreachable, not yet approved in wallet, no connection). There is never an Admit button for a failed check.
+- **Overview:** entry count against minted tickets, plus the last 10 admissions (`GET /api/organisers/events/:id/checkins`).
+- **Linking:** nothing links to this page yet. Agent C's seller event management can link to it per event.
+
+Next for Agent D: the edge-case suite (XRPL-049).
