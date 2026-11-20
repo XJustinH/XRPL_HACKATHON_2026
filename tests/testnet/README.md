@@ -18,7 +18,7 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 |---|---|
 | Mint a ticket NFT. The ticket becomes `MINTED` only from the validated ledger result, and is recorded exactly once | Runs |
 | Look up the NFT on the ledger: the seller's wallet holds it, and it is transferable with the ticket's metadata URI | Runs |
-| Primary sell offer | To do: needs XRPL-029 |
+| List the ticket for sale at its tier price. The offer becomes `ACTIVE` only once validated, the ledger shows the same open sell offer (seller, price, no destination), and it appears in the event's public listing | Runs |
 | A buyer accepts the offer and becomes the owner | To do: needs XRPL-031 |
 | Resale or private transfer to a friend | To do: needs XRPL-036, XRPL-039, XRPL-040 |
 | The holder checks in once, and a second check-in is rejected | To do: needs XRPL-045, XRPL-047 |

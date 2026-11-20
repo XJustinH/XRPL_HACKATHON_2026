@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { createXrplQueryService } from "@/lib/xrpl";
+import { listPrimaryOffers, reconcilePrimaryOffer, requestPrimaryOffer, type OfferDeps } from "@/lib/xrpl/offers/primary";
 import { reconcileTicketMint, requestTicketMint, type MintDeps } from "@/lib/xrpl/tickets/minting";
 import { createWalletTransactionRequests } from "@/lib/xrpl/wallet/transaction-requests";
 import { AutoApproveXaman } from "./support/auto-approve-xaman";
@@ -25,6 +26,7 @@ const ledger = createXrplQueryService(config);
 let seller: TestWallet;
 let xaman: AutoApproveXaman;
 let deps: MintDeps;
+let offerDeps: OfferDeps;
 let sellerId: string;
 let eventId: string;
 let tierId: string;
@@ -45,6 +47,7 @@ beforeAll(async () => {
     // wallets and explorers display the NFT, not its validity.
     baseUrl: "http://localhost:3000",
   };
+  offerDeps = { db, transactions: deps.transactions, ledger: () => ledger, config };
 
   const user = await db.user.create({
     data: { displayName: "Lifecycle test seller", role: "SELLER", onboardedAt: new Date() },
@@ -145,7 +148,54 @@ describe("ticket lifecycle on XRPL Testnet (XRPL-050)", () => {
     });
   });
 
-  it.todo("lists the ticket with a primary sell offer (needs XRPL-029)");
+  it("lists the ticket for sale at its tier price, confirmed on the ledger", async () => {
+    const { offer } = await requestPrimaryOffer(offerDeps, { session: sellerSession(), ticketId });
+    expect(xaman.approved.at(-1)?.txjson).toMatchObject({
+      TransactionType: "NFTokenCreateOffer",
+      Account: seller.classicAddress,
+      NFTokenID: nftokenId,
+      Amount: "1000000",
+    });
+    expect(xaman.approved.at(-1)?.txjson).not.toHaveProperty("Destination");
+
+    const listed = await waitFor(
+      () => reconcilePrimaryOffer(offerDeps, offer.id),
+      (o) => o.state !== "PENDING_SIGNATURE",
+      { what: "the sell offer to reach a validated ledger" },
+    );
+    expect(listed).toMatchObject({
+      state: "ACTIVE",
+      kind: "PRIMARY",
+      ownerAddress: seller.classicAddress,
+      amountDrops: "1000000",
+      destinationAddress: null,
+      createTxHash: xaman.approved.at(-1)?.hash,
+    });
+    expect(listed.offerIndex).toMatch(/^[0-9A-F]{64}$/);
+
+    // The ledger holds the same open sell offer: anyone may buy it at the tier price.
+    const onLedger = await ledger.getOffers(nftokenId);
+    expect(onLedger.sellOffers).toContainEqual(
+      expect.objectContaining({
+        offerIndex: listed.offerIndex,
+        owner: seller.classicAddress,
+        amountDrops: "1000000",
+        destination: null,
+      }),
+    );
+
+    // Buyers see it in the event's public listing.
+    expect(await listPrimaryOffers(db, eventId)).toEqual([
+      expect.objectContaining({
+        offerId: offer.id,
+        offerIndex: listed.offerIndex,
+        ticketId,
+        sellerAddress: seller.classicAddress,
+        amountDrops: "1000000",
+      }),
+    ]);
+  });
+
   it.todo("a buyer accepts the offer and becomes the owner on the ledger (needs XRPL-031)");
   it.todo("the buyer resells the ticket or sends it privately to a friend (needs XRPL-036, XRPL-039, XRPL-040)");
   it.todo("the current holder checks in once, and a second check-in is rejected (needs XRPL-045, XRPL-047)");
