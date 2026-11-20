@@ -6,6 +6,7 @@ import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
 import { EventCard } from "@/features/events/event-card";
+import { organiserBrowseHref } from "@/features/discovery/browse-links";
 import {
   getSellerProfile,
   listSellerStorefrontEvents,
@@ -149,9 +150,19 @@ export default async function SellerStorefrontPage({
       ) : null}
 
       <section aria-labelledby="events-heading" className="mt-10">
-        <h2 id="events-heading" className="text-lg font-semibold">
-          Upcoming events
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="events-heading" className="text-lg font-semibold">
+            Upcoming events
+          </h2>
+          {events.length > 0 ? (
+            <Link
+              href={organiserBrowseHref(profile.id)}
+              className="text-sm font-medium text-accent underline"
+            >
+              Search within this organiser
+            </Link>
+          ) : null}
+        </div>
         {events.length === 0 ? (
           <p className="mt-4 rounded-card border border-dashed border-border bg-surface px-5 py-6 text-center text-sm text-muted">
             No upcoming events on sale right now.
