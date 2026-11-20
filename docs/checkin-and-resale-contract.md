@@ -203,8 +203,8 @@ the dataviz palette checks against the card surface. Resales made outside the ap
 
 ## Reviews from verified attendees (XRPL-079)
 
-**Status:** logic, routes, attendance check and UI are done. **Saving and listing wait on Agent A's
-`Review` table** (requested); until it lands they answer 503 ("Reviews aren't available yet").
+**Status:** done end to end. Reviews are stored in Agent A's `Review` table (#146) via
+`src/features/reviews/prisma-store.ts`. The table also enforces one review per check-in and a rating of 1–5.
 
 - **Who may review:** a customer whose **verified, unrevoked** `WalletLink` address has a `CheckInRecord`
   for the event (`src/features/reviews/attendance.ts`). Checked on the server for every create and edit.
@@ -221,5 +221,4 @@ the dataviz palette checks against the card surface. Resales made outside the ap
 It shows the average, the list with an empty state, a star-rating form for attendees (edit mode if
 they already posted), and plain messages for non-attendees and signed-out visitors.
 
-**When the table lands:** add a Prisma `ReviewStore` and swap `unavailableReviewStore` in
-`src/features/reviews/server.ts`. Nothing else changes.
+`unavailableReviewStore` (503 for everything) is kept in `server.ts` to switch reviews off quickly if ever needed.
