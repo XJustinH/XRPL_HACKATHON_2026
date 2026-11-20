@@ -21,3 +21,6 @@ next-env.d.ts
 
 # XRPL dev wallets (throwaway Testnet seeds, Agent B)
 .xrpl-dev-wallets*.json
+
+# Vercel CLI project link (created by `vercel link`; may cache env values)
+.vercel
