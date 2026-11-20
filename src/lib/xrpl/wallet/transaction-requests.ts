@@ -26,6 +26,7 @@ const TxHashHex = /^[0-9A-Fa-f]{64}$/;
 const PURPOSE_TRANSACTION_TYPES: Record<TransactionPurpose, string> = {
   TEST: "AccountSet",
   MINT_TICKET: "NFTokenMint",
+  CREATE_PRIMARY_OFFER: "NFTokenCreateOffer",
 };
 
 const RequestMeta = z.object({

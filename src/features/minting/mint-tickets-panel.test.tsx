@@ -32,6 +32,7 @@ function ticket(serial: number, extra: Partial<MintTicketView> = {}): MintTicket
     cachedOwnership: { ownerAddress: null, syncStatus: "UNSYNCED", syncedAt: null, ledgerIndex: null },
     nftExplorerUrl: null,
     mintTxExplorerUrl: null,
+    primaryOffer: null,
     ...extra,
   };
 }
@@ -137,6 +138,18 @@ function mockApi({
       );
     }
     if (url === `/api/events/${EVENT}/mints`) return json(lists.length > 1 ? lists.shift() : lists[0]);
+    const listing = /^\/api\/tickets\/(.+)\/primary-offers$/.exec(url);
+    if (listing && method === "POST") {
+      posts += 1;
+      const n = 100 + posts; // listing requests are numbered from 101
+      const offer = {
+        id: ticketId(n),
+        ticketId: listing[1],
+        state: "PENDING_SIGNATURE",
+        amountDrops: "2500000",
+      };
+      return json({ offer, request: { ...txRequest(n, "PENDING"), purpose: "CREATE_PRIMARY_OFFER" } }, 201);
+    }
     const polled = /^\/api\/wallet\/transaction-requests\/.+-(\d{12})$/.exec(url);
     if (polled) {
       const n = Number(polled[1]);
@@ -324,6 +337,63 @@ describe("MintTicketsPanel", () => {
         fetchMock.mock.calls.filter(([url]) => String(url) === `/api/events/${EVENT}/mints`),
       ).toHaveLength(2),
     );
+  });
+
+  it("lists minted tickets for sale at the tier price, one approval at a time (XRPL-029)", async () => {
+    const fetchMock = mockApi({ listings: [eventMints([minted(1), minted(2)], 2, 2)] });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "List 2 for sale at 2.5 XRP" }));
+
+    const progress = await screen.findByRole("region", { name: "Listing progress" });
+    expect(
+      await within(progress).findByText("Listed 2 tickets of General Admission for sale at 2.5 XRP."),
+    ).toBeVisible();
+    expect(within(progress).getByText("2 of 2 listed")).toBeVisible();
+
+    const posts = fetchMock.mock.calls.filter(
+      ([url, init]) => /primary-offers$/.test(String(url)) && init?.method === "POST",
+    );
+    expect(posts.map(([url]) => String(url))).toEqual([
+      `/api/tickets/${ticketId(1)}/primary-offers`,
+      `/api/tickets/${ticketId(2)}/primary-offers`,
+    ]);
+    expect(posts.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{}, {}]); // the price is the tier's
+    const keys = posts.map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+    expect(keys).toEqual([`${keys[0]!.slice(0, 32)}-0`, `${keys[0]!.slice(0, 32)}-1`]);
+  });
+
+  it("shows each minted ticket's sale status and only offers unlisted tickets", async () => {
+    const offer = (n: number, state: "ACTIVE" | "PENDING_SIGNATURE" | "FAILED") => ({
+      id: ticketId(200 + n),
+      state,
+      amountDrops: "2500000",
+      offerIndex: null,
+    });
+    mockApi({
+      listings: [
+        eventMints(
+          [
+            { ...minted(1), primaryOffer: offer(1, "ACTIVE") },
+            { ...minted(2), primaryOffer: offer(2, "PENDING_SIGNATURE") },
+            { ...minted(3), primarySoldAt: "2026-11-20T20:00:00.000Z" },
+            { ...minted(4), primaryOffer: offer(4, "FAILED") },
+            minted(5),
+          ],
+          5,
+          5,
+        ),
+      ],
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+
+    const list = await screen.findByRole("list", { name: "General Admission: minted tickets" });
+    expect(within(list).getByText("For sale · 2.5 XRP")).toBeVisible();
+    expect(within(list).getByText("Listing: awaiting approval")).toBeVisible();
+    expect(within(list).getByText("Sold")).toBeVisible();
+    expect(within(list).getByText("Not for sale")).toBeVisible(); // its listing failed
+    expect(screen.getByText("1 for sale · 1 sold")).toBeVisible();
+    // Only #4 (failed listing) and #5 (never listed) can be listed now.
+    expect(screen.getByRole("button", { name: "List 2 for sale at 2.5 XRP" })).toBeEnabled();
   });
 
   it("checks the event against the ledger and reloads after recording a missed mint", async () => {

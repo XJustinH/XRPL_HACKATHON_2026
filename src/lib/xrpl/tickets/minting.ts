@@ -2,7 +2,7 @@ import { convertStringToHex, parseNFTokenID } from "xrpl";
 
 import type { XrplNetwork } from "@/contracts/entities";
 import type { EventMints, MintRequestResult, MintTicketView, TransactionRequest } from "@/contracts/xrpl";
-import type { LedgerTransaction, PrismaClient, TicketNFT } from "@/generated/prisma/client";
+import type { LedgerTransaction, NFTOffer, PrismaClient, TicketNFT } from "@/generated/prisma/client";
 import { requireEventOwner, requireProvenWallet } from "@/lib/auth/permissions";
 import type { AuthSession } from "@/lib/auth/session";
 import { toTicketDto, toTicketTierDto } from "@/lib/db/mappers";
@@ -12,6 +12,7 @@ import type { XrplConfig } from "../config";
 import { explorerNftUrl, explorerTxUrl } from "../explorer";
 import type { XrplQueryService } from "../query";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
+import { reconcileEventPrimaryOffers } from "../offers/primary";
 import { encodeNftUri, ticketTaxon, TICKET_MEMO_TYPE, TICKET_NFT_FLAGS } from "./metadata";
 import { createPendingTicket } from "./store";
 import { isPubliclyReachable } from "./urls";
@@ -26,7 +27,7 @@ export interface MintDeps {
   db: PrismaClient;
   /** Lazy, so listing works even when Xaman is not configured. */
   transactions: () => Pick<WalletTransactionRequests, "create" | "get">;
-  ledger: () => Pick<XrplQueryService, "getValidatedTx" | "verifyOwner" | "getAccountMints">;
+  ledger: () => Pick<XrplQueryService, "getValidatedTx" | "verifyOwner" | "getAccountMints" | "getOffers">;
   config: Pick<XrplConfig, "network" | "explorerUrl">;
   /** Public base URL for metadata URIs (`ticketPublicBaseUrl()`). */
   baseUrl: string;
@@ -39,11 +40,23 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-export function toMintTicketView(ticket: TicketNFT, config: Pick<XrplConfig, "explorerUrl">): MintTicketView {
+export function toMintTicketView(
+  ticket: TicketNFT,
+  config: Pick<XrplConfig, "explorerUrl">,
+  primaryOffer: Pick<NFTOffer, "id" | "state" | "amountDrops" | "offerIndex"> | null = null,
+): MintTicketView {
   return {
     ...toTicketDto(ticket),
     nftExplorerUrl: ticket.nftokenId ? explorerNftUrl(config, ticket.nftokenId) : null,
     mintTxExplorerUrl: ticket.mintTxHash ? explorerTxUrl(config, ticket.mintTxHash) : null,
+    primaryOffer: primaryOffer
+      ? {
+          id: primaryOffer.id,
+          state: primaryOffer.state,
+          amountDrops: primaryOffer.amountDrops,
+          offerIndex: primaryOffer.offerIndex,
+        }
+      : null,
   };
 }
 
@@ -296,17 +309,28 @@ export async function getEventMints(
     }
   }
 
+  // Sale listings awaiting the seller's approval (XRPL-029) are brought up to date too.
+  await reconcileEventPrimaryOffers(deps, event.id);
+
   const tiers = await deps.db.ticketTier.findMany({
     where: { eventId: event.id },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: { tickets: { orderBy: { serial: "asc" } } },
+    include: {
+      tickets: {
+        orderBy: { serial: "asc" },
+        // The latest primary sale offer per ticket (XRPL-029).
+        include: { offers: { where: { kind: "PRIMARY" }, orderBy: { createdAt: "desc" }, take: 1 } },
+      },
+    },
   });
   return {
     eventId: event.id,
     title: event.title,
     tiers: tiers.map(({ tickets, ...tier }) => ({
       ...toTicketTierDto(tier),
-      tickets: tickets.map((ticket) => toMintTicketView(ticket, deps.config)),
+      tickets: tickets.map(({ offers, ...ticket }) =>
+        toMintTicketView(ticket, deps.config, offers[0] ?? null),
+      ),
     })),
   };
 }
