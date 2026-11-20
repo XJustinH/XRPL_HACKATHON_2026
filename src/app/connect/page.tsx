@@ -1,0 +1,30 @@
+import { PageHeader } from "@/components/ui/page-header";
+import { NotImplementedNotice } from "@/components/ui/empty-state";
+
+export const metadata = { title: "Connect wallet" };
+
+export default function ConnectPage() {
+  return (
+    <>
+      <PageHeader
+        title="Connect your wallet"
+        description="You approve every transaction in your own wallet. This platform never asks for a seed phrase or private key."
+      />
+      <NotImplementedNotice
+        title="Wallet connect and session linking"
+        blockedBy="XRPL-011 (wallet connect) and XRPL-012 (proving wallet control and linking it to a session)"
+      />
+      <section className="mt-6 rounded-card border border-border bg-surface-raised p-5 text-sm text-muted">
+        <h2 className="text-sm font-semibold text-ink">What to expect</h2>
+        <ol className="mt-3 list-decimal space-y-2 pl-5">
+          <li>You receive a sign request in your wallet application.</li>
+          <li>You review the exact transaction and approve or reject it.</li>
+          <li>
+            The platform waits for the transaction to be validated on the ledger
+            before showing it as confirmed.
+          </li>
+        </ol>
+      </section>
+    </>
+  );
+}
