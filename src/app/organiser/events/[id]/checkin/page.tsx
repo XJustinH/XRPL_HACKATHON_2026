@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { GateScanner } from "@/features/checkin/gate-scanner";
 import { EventSellerAccess } from "@/features/checkin/organiser-access";
 import { EntryOverview } from "@/features/organiser/entry-overview";
+import { OrganiserEventTabs } from "@/features/organiser/event-tabs";
 import { getCheckInOverview } from "@/features/organiser/checkin-overview";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
@@ -68,6 +69,7 @@ export default async function EventCheckInPage({ params }: { params: Promise<{ i
         title={`Check-in: ${event.title}`}
         description={`${event.venue}, ${event.city} · ${event.startsAt.toUTCString()}`}
       />
+      <OrganiserEventTabs eventId={eventId} current="checkin" />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
         <GateScanner eventId={eventId} />
         <EntryOverview overview={overview} />
