@@ -24,7 +24,9 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 | List the ticket for sale at its tier price. The offer becomes `ACTIVE` only once validated, the ledger shows the same open sell offer (seller, price, no destination), and it appears in the event's public listing | Runs |
 | A buyer accepts the offer with their own wallet. Recorded as sold, with the buyer as owner, only from the validated ledger result. On the ledger the buyer holds the NFT, the seller doesn't, and the offer is gone. The ticket leaves the public listing | Runs |
 | Resale or private transfer to a friend | To do: needs XRPL-036, XRPL-039, XRPL-040 |
-| The holder checks in once, and a second check-in is rejected | To do: needs XRPL-045, XRPL-047 |
+| The holder checks in once, and a second check-in is rejected. The seller (no longer the owner) can't get a door code; an unapproved code is refused; another wallet can't approve the holder's code; the holder approves with a Xaman-style sign-in signed by their own Testnet key, which the app verifies; ownership is read from a validated ledger at the door; a repeat scan and a fresh code for the used ticket are refused; exactly one attendance record | Runs |
+| The organiser's figures match the real sale and entry: inventory (1 of 2 sold), analytics (1 XRP revenue, 1 checked in, nothing pending), and in-app resale still closed while a ticket is unsold | Runs |
+| Only someone who was checked in can review the event | Runs |
 
 The test waits for each validated ledger outcome by polling until it is final (`support/wait.ts`), never
 for a fixed time.
@@ -35,8 +37,12 @@ for a fixed time.
 - **Simulated: the person approving in Xaman.** `support/auto-approve-xaman.ts` takes Xaman's place. It
   approves each request by signing exactly the transaction the server built (adding only fee, sequence
   and expiry, as Xaman does) with a throwaway wallet, then submits it.
-- **Simulated: the wallet sign-in proof (XRPL-012).** That has its own tests. Here the seller's session
-  starts with the throwaway wallet as its proven wallet.
+- **Simulated: the session's wallet sign-in (XRPL-012).** That has its own tests. Here sessions start with
+  the throwaway wallet as their proven wallet.
+- **Check-in sign-ins are approved by the same double.** The test names the approving wallet with
+  `xaman.signInWith(wallet)`. The double returns a blob in Xaman's SignIn format (`makeSignInBlob`),
+  signed with that wallet's own Testnet key, and the app verifies it exactly as it would a real one.
+  A sign-in is never submitted to the ledger.
 
 Wallets are new faucet-funded Testnet accounts for every run. They live only in memory: nothing is saved
 and no seed is printed. All ledger access goes through the app's XRPL module, which refuses anything but
@@ -47,5 +53,5 @@ affects how explorers display the NFTs.
 
 - **A step that needs another person's wallet**: fund another wallet with `fundTestWallet()` and pass it to
   `AutoApproveXaman`, which signs for any wallet it was given (the purchase step does this for the buyer).
-- **Check-in** proves wallet control with a Xaman sign-in rather than a transaction. The double will need
-  to answer sign-in requests too.
+- **A step that needs a wallet sign-in** (not a transaction): call `xaman.signInWith(wallet)` before the
+  app creates the sign-in request, as the check-in step does.

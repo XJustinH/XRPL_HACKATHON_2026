@@ -26,6 +26,13 @@ Optional extras if there is time:
 - Let a code run past its countdown, then scan it. It shows **Code expired**.
 - Transfer the NFT to another wallet in Xaman, then scan. It shows **Ticket not held by this wallet**.
 
+## Live Testnet evidence
+
+The ticket lifecycle suite (`tests/testnet`, run with **Actions → Testnet lifecycle → Run workflow** or
+`npm run test:testnet`) runs the whole door flow against real XRPL Testnet: mint, list, buy, then check-in
+with the buyer's own wallet approving, a rejected repeat scan, and the organiser's inventory and analytics
+updating. Its run log is the evidence to show if the live demo can't run.
+
 ## Fallback (no live wallet approval)
 
 Run the automated suite and show the output. It covers the same cases through the real routes and database:
