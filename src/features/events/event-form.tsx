@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { EventDraftInput, type EventView } from "@/contracts";
 import { postJson } from "@/features/onboarding/post-json";
+import { FieldError } from "./field-error";
 
 /**
  * Seller event creation form (XRPL-015).
@@ -39,15 +40,6 @@ export function utcIsoToLocalInput(iso: string | null): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
     date.getHours(),
   )}:${pad(date.getMinutes())}`;
-}
-
-function FieldError({ id, message }: { id: string; message?: string }) {
-  if (!message) return null;
-  return (
-    <p id={id} className="mt-1 text-sm text-critical">
-      {message}
-    </p>
-  );
 }
 
 export function EventForm() {

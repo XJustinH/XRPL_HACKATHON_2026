@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { TicketTierInput, type EventView, type TicketTierView } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
-import { postJson } from "@/features/onboarding/post-json";
+import { requestJson } from "./api-client";
 import { dropsToXrpInput, formatXrp, xrpToDrops } from "./event-formatting";
 
 /**
@@ -86,9 +86,9 @@ function TierRow({
   });
 
   async function save() {
-    const result = draftToTierInput(draft);
-    if (!result.ok) {
-      setErrors(result.errors);
+    const validated = draftToTierInput(draft);
+    if (!validated.ok) {
+      setErrors(validated.errors);
       return;
     }
     setErrors({});
@@ -96,60 +96,42 @@ function TierRow({
 
     // A locked tier may still have its name and description corrected.
     const body = tier.locked
-      ? { name: result.value.name, description: result.value.description }
+      ? { name: validated.value.name, description: validated.value.description }
       : {
-          name: result.value.name,
-          description: result.value.description,
-          priceDrops: result.value.priceDrops,
-          totalSupply: result.value.totalSupply,
+          name: validated.value.name,
+          description: validated.value.description,
+          priceDrops: validated.value.priceDrops,
+          totalSupply: validated.value.totalSupply,
         };
 
-    const response = await fetch(`/api/events/${eventId}/tiers/${tier.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      credentials: "same-origin",
-    });
-    const payload: unknown = await response.json().catch(() => null);
+    const result = await requestJson<EventView>(
+      `/api/events/${eventId}/tiers/${tier.id}`,
+      { method: "PATCH", body },
+    );
     setPending(false);
 
-    if (!response.ok) {
-      const message =
-        payload && typeof payload === "object" && "error" in payload
-          ? ((payload as { error: { message?: string } }).error.message ??
-            "Could not save the tier.")
-          : "Could not save the tier.";
-      onError(message);
+    if (!result.ok) {
+      onError(result.message);
       return;
     }
     setEditing(false);
-    if (payload && typeof payload === "object" && "data" in payload) {
-      onChanged((payload as { data: EventView }).data);
-    }
+    onChanged(result.data);
     router.refresh();
   }
 
   async function remove() {
     setPending(true);
-    const response = await fetch(`/api/events/${eventId}/tiers/${tier.id}`, {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-    const payload: unknown = await response.json().catch(() => null);
+    const result = await requestJson<EventView>(
+      `/api/events/${eventId}/tiers/${tier.id}`,
+      { method: "DELETE" },
+    );
     setPending(false);
 
-    if (!response.ok) {
-      const message =
-        payload && typeof payload === "object" && "error" in payload
-          ? ((payload as { error: { message?: string } }).error.message ??
-            "Could not remove the tier.")
-          : "Could not remove the tier.";
-      onError(message);
+    if (!result.ok) {
+      onError(result.message);
       return;
     }
-    if (payload && typeof payload === "object" && "data" in payload) {
-      onChanged((payload as { data: EventView }).data);
-    }
+    onChanged(result.data);
     router.refresh();
   }
 
@@ -330,7 +312,10 @@ export function TierManager({ event: initialEvent }: { event: EventView }) {
     setErrors({});
     setPending(true);
 
-    const response = await postJson<EventView>(`/api/events/${event.id}/tiers`, result.value);
+    const response = await requestJson<EventView>(`/api/events/${event.id}/tiers`, {
+      method: "POST",
+      body: result.value,
+    });
     setPending(false);
     if (!response.ok) {
       setFormError(response.message);

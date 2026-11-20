@@ -1,11 +1,18 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type {
   EventDraftInput,
+  EventPatch,
   EventView,
   TicketTierInput,
   TicketTierPatch,
   TicketTierView,
 } from "@/contracts";
+import {
+  describeLockedFields,
+  hasMintedTickets,
+  lockedFieldsInPatch,
+  publishBlockers,
+} from "./publish-rules";
 
 /**
  * Event and ticket-tier reads and writes for the seller management views
@@ -106,6 +113,160 @@ export async function createEventDraft(
 export async function getEventView(db: EventDb, eventId: string): Promise<EventView | null> {
   const row = await db.event.findUnique({ where: { id: eventId }, include: eventInclude });
   return row ? toEventView(row) : null;
+}
+
+/**
+ * Published events only, soonest first, excluding events that have already
+ * started.
+ *
+ * This is the query behind the public listing (XRPL-018). Drafts are filtered
+ * in the database rather than after loading, so an unpublished event cannot
+ * reach a public response by accident.
+ */
+export async function listPublishedEvents(
+  db: EventDb,
+  options: { now?: Date; take?: number } = {},
+): Promise<EventView[]> {
+  const rows = await db.event.findMany({
+    where: { status: "PUBLISHED", startsAt: { gt: options.now ?? new Date() } },
+    orderBy: [{ startsAt: "asc" }],
+    take: options.take ?? 50,
+    include: eventInclude,
+  });
+  return rows.map(toEventView);
+}
+
+/** A published event by id. Returns null for drafts, so callers cannot leak one. */
+export async function getPublishedEvent(
+  db: EventDb,
+  eventId: string,
+): Promise<EventView | null> {
+  const row = await db.event.findFirst({
+    where: { id: eventId, status: "PUBLISHED" },
+    include: eventInclude,
+  });
+  return row ? toEventView(row) : null;
+}
+
+/** Raised when an event state change is refused by a domain rule. */
+export class EventRuleError extends Error {
+  constructor(
+    readonly code:
+      | "EVENT_NOT_FOUND"
+      | "FIELDS_LOCKED_BY_MINT"
+      | "NOT_PUBLISHABLE"
+      | "ALREADY_PUBLISHED"
+      | "NOT_PUBLISHED"
+      | "HAS_MINTED_TICKETS",
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "EventRuleError";
+  }
+}
+
+async function requireEventView(db: EventDb, eventId: string): Promise<EventView> {
+  const event = await getEventView(db, eventId);
+  if (!event) throw new EventRuleError("EVENT_NOT_FOUND", "Event not found");
+  return event;
+}
+
+/**
+ * Edits an event's details.
+ *
+ * Fields that are copied into ticket NFT metadata are frozen once minting has
+ * started; see `NFT_RELEVANT_FIELDS`. Everything else stays editable in both
+ * draft and published states.
+ */
+export async function updateEvent(
+  db: EventDb,
+  eventId: string,
+  patch: EventPatch,
+): Promise<EventView> {
+  const event = await requireEventView(db, eventId);
+
+  const locked = lockedFieldsInPatch(event, patch);
+  if (locked.length > 0) {
+    throw new EventRuleError(
+      "FIELDS_LOCKED_BY_MINT",
+      `Tickets for this event are already on the ledger, so the ${describeLockedFields(
+        locked,
+      )} cannot be changed.`,
+      { fields: locked },
+    );
+  }
+
+  const row = await db.event.update({
+    where: { id: eventId },
+    data: {
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.startsAt !== undefined ? { startsAt: new Date(patch.startsAt) } : {}),
+      ...(patch.endsAt !== undefined
+        ? { endsAt: patch.endsAt ? new Date(patch.endsAt) : null }
+        : {}),
+      ...(patch.venue !== undefined ? { venue: patch.venue } : {}),
+      ...(patch.city !== undefined ? { city: patch.city } : {}),
+      ...(patch.artworkUrl !== undefined
+        ? { artworkUrl: patch.artworkUrl?.trim() ? patch.artworkUrl : null }
+        : {}),
+    },
+    include: eventInclude,
+  });
+  return toEventView(row);
+}
+
+/**
+ * Publishes a draft after checking it is complete.
+ *
+ * `publishedAt` is set only on the first publish, so re-publishing after a
+ * return to draft does not rewrite the original publication time.
+ */
+export async function publishEvent(
+  db: EventDb,
+  eventId: string,
+  now = new Date(),
+): Promise<EventView> {
+  const event = await requireEventView(db, eventId);
+  if (event.status === "PUBLISHED") {
+    throw new EventRuleError("ALREADY_PUBLISHED", "This event is already published");
+  }
+
+  const blockers = publishBlockers(event, now);
+  if (blockers.length > 0) {
+    throw new EventRuleError("NOT_PUBLISHABLE", "This event is not ready to publish", {
+      blockers,
+    });
+  }
+
+  const row = await db.event.update({
+    where: { id: eventId },
+    data: { status: "PUBLISHED", publishedAt: event.publishedAt ? undefined : now },
+    include: eventInclude,
+  });
+  return toEventView(row);
+}
+
+/** Returns a published event to draft, hiding it from the public listing. */
+export async function unpublishEvent(db: EventDb, eventId: string): Promise<EventView> {
+  const event = await requireEventView(db, eventId);
+  if (event.status !== "PUBLISHED") {
+    throw new EventRuleError("NOT_PUBLISHED", "This event is not published");
+  }
+  if (hasMintedTickets(event)) {
+    throw new EventRuleError(
+      "HAS_MINTED_TICKETS",
+      "Tickets for this event are already on the ledger, so it cannot be hidden from buyers.",
+    );
+  }
+
+  const row = await db.event.update({
+    where: { id: eventId },
+    data: { status: "DRAFT" },
+    include: eventInclude,
+  });
+  return toEventView(row);
 }
 
 type TierDb = Pick<PrismaClient, "event" | "ticketTier" | "ticketNFT">;
