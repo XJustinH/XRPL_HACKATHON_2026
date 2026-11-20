@@ -11,14 +11,6 @@ import { card, NETWORK_LABEL, notice, primaryButton } from "@/features/wallet/st
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
 
-/** An event the seller can mint tickets for (from `listSellerEventsForMinting`). */
-export interface MintableEvent {
-  id: string;
-  title: string;
-  status: string;
-  startsAt: string;
-}
-
 type EventTier = EventMints["tiers"][number];
 
 class ApiError extends Error {
@@ -65,25 +57,27 @@ const STATUS: Record<MintStatus, { label: string; tone: BadgeTone }> = {
 const shortId = (id: string) => `${id.slice(0, 8)}…${id.slice(-6)}`;
 
 /**
- * Seller minting (XRPL-024): pick an event, then mint the next ticket of a tier as a
- * transferable NFTokenMint signed in the seller's own Xaman wallet. A ticket shows as
- * minted only after the ledger validated the transaction (the list is reloaded from
+ * Seller minting for one event (XRPL-024), shown on the event's own page: mint the next ticket
+ * of a tier as a transferable NFTokenMint signed in the seller's own Xaman wallet. A ticket
+ * shows as minted only after the ledger validated the transaction (the list is reloaded from
  * `GET /api/events/:id/mints`, which reconciles every mint in flight).
  *
- * `issuerAddress` is the session's proven wallet (XRPL-012), passed by the server page.
- * The server mints with that wallet; the browser never chooses the issuer.
+ * - `issuerAddress` is the session's proven wallet (XRPL-012), passed by the server page. The
+ *   server mints with that wallet; the browser never chooses the issuer.
+ * - `tiersVersion` changes when the page's tiers change (Agent C's tier manager refreshes the
+ *   page), so the list reloads without losing an approval in progress.
  */
 export function MintTicketsPanel({
-  events,
+  eventId,
   issuerAddress,
+  tiersVersion = "",
   pollIntervalMs,
 }: {
-  events: MintableEvent[];
+  eventId: string;
   issuerAddress: string | null;
+  tiersVersion?: string;
   pollIntervalMs?: number;
 }) {
-  const [eventId, setEventId] = useState(events[0]?.id ?? "");
-
   return (
     <section className={card} aria-labelledby="mint-heading">
       <h2 id="mint-heading" className="text-lg font-semibold">
@@ -94,53 +88,26 @@ export function MintTicketsPanel({
         recorded as the issuer. A ticket counts as minted only once the XRP Ledger has validated it.
       </p>
 
-      {events.length === 0 ? (
-        <p className="mt-4 text-sm text-muted">
-          You have no events yet. Create an event with a ticket tier first.
+      {issuerAddress ? (
+        <p className="mt-4 text-sm">
+          Issuing wallet: <span className="font-mono break-all">{issuerAddress}</span>
         </p>
       ) : (
-        <>
-          {issuerAddress ? (
-            <p className="mt-4 text-sm">
-              Issuing wallet: <span className="font-mono break-all">{issuerAddress}</span>
-            </p>
-          ) : (
-            <p className={`mt-4 ${notice.caution}`}>
-              Connect your Xaman wallet to mint. Approving the sign-in proves the wallet is yours, and it
-              becomes the issuer of the tickets you mint.{" "}
-              <Link href="/connect" className="font-semibold underline">
-                Connect wallet
-              </Link>
-            </p>
-          )}
-
-          {events.length > 1 ? (
-            <label className="mt-4 flex flex-col gap-1 text-sm font-medium">
-              Event
-              <select
-                value={eventId}
-                onChange={(e) => setEventId(e.target.value)}
-                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-normal"
-              >
-                {events.map((event) => (
-                  <option key={event.id} value={event.id}>
-                    {event.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {eventId ? (
-            <EventMintSection
-              key={eventId}
-              eventId={eventId}
-              issuerAddress={issuerAddress}
-              pollIntervalMs={pollIntervalMs}
-            />
-          ) : null}
-        </>
+        <p className={`mt-4 ${notice.caution}`}>
+          Connect your Xaman wallet to mint. Approving the sign-in proves the wallet is yours, and it becomes
+          the issuer of the tickets you mint.{" "}
+          <Link href="/connect" className="font-semibold underline">
+            Connect wallet
+          </Link>
+        </p>
       )}
+
+      <EventMintSection
+        eventId={eventId}
+        issuerAddress={issuerAddress}
+        tiersVersion={tiersVersion}
+        pollIntervalMs={pollIntervalMs}
+      />
     </section>
   );
 }
@@ -148,10 +115,12 @@ export function MintTicketsPanel({
 function EventMintSection({
   eventId,
   issuerAddress,
+  tiersVersion,
   pollIntervalMs,
 }: {
   eventId: string;
   issuerAddress: string | null;
+  tiersVersion: string;
   pollIntervalMs?: number;
 }) {
   const [mints, setMints] = useState<EventMints | null>(null);
@@ -183,7 +152,7 @@ function EventMintSection({
     return () => {
       current = false;
     };
-  }, [eventId, reloads]);
+  }, [eventId, reloads, tiersVersion]);
 
   const mint = async (tier: EventTier) => {
     if (!issuerAddress) return;

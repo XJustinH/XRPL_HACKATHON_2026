@@ -293,15 +293,3 @@ export async function getEventMints(
     })),
   };
 }
-
-/** A seller's events for the minting panel's picker (dates as ISO strings for the client). */
-export async function listSellerEventsForMinting(db: PrismaClient, sellerId: string) {
-  const events = await db.event.findMany({
-    where: { sellerId },
-    orderBy: { startsAt: "asc" },
-    select: { id: true, title: true, status: true, startsAt: true },
-  });
-  return events.map((event) => ({ ...event, startsAt: event.startsAt.toISOString() }));
-}
-
-export type SellerMintEvent = Awaited<ReturnType<typeof listSellerEventsForMinting>>[number];

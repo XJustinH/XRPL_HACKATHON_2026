@@ -80,8 +80,8 @@ Served publicly at the ticket's URI. It follows the XLS-24 layout so wallets and
 
 ## Minting a ticket (XRPL-024)
 
-The seller mints one ticket at a time from **Manage events** (`/seller/events`), signing each
-`NFTokenMint` in their own Xaman wallet. The app never holds a seller key. Code:
+The seller mints one ticket at a time from the event's own page (`/seller/events/:id`, below Agent C's
+tier setup), signing each `NFTokenMint` in their own Xaman wallet. The app never holds a seller key. Code:
 `src/lib/xrpl/tickets/minting.ts`, `src/app/api/events/[id]/mints/route.ts`, UI in `src/features/minting/`.
 
 1. **Request.** `POST /api/events/:id/mints` with `{ tierId }` and an `Idempotency-Key` header. Only the

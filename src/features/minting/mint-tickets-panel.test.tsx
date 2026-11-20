@@ -13,9 +13,6 @@ const REQUEST = "515b9d76-f7cc-4f3b-979e-a82500340424";
 const ISSUER = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
 const NFT = "00080000A1B2C3D4E5F60718293A4B5C6D7E8F9012345678ABCDEF0100000007";
 const TX = "E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879";
-const EVENTS = [
-  { id: EVENT, title: "Testnet Tones Live", status: "PUBLISHED", startsAt: "2027-03-12T20:00:00.000Z" },
-];
 
 function ticket(extra: Partial<MintTicketView> = {}): MintTicketView {
   return {
@@ -132,7 +129,7 @@ describe("MintTicketsPanel", () => {
     const fetchMock = mockApi({
       listings: [eventMints([]), eventMints([ticket()]), eventMints([MINTED], 1)],
     });
-    render(<MintTicketsPanel events={EVENTS} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
 
     expect(await screen.findByText("2.5 XRP · Minted 0 of 50")).toBeVisible();
     expect(screen.getByText(ISSUER)).toBeVisible();
@@ -159,7 +156,7 @@ describe("MintTicketsPanel", () => {
 
   it("asks for a proven wallet before minting", async () => {
     mockApi({ listings: [eventMints([])] });
-    render(<MintTicketsPanel events={EVENTS} issuerAddress={null} />);
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={null} />);
 
     expect(await screen.findByRole("link", { name: "Connect wallet" })).toHaveAttribute("href", "/connect");
     expect(await screen.findByRole("button", { name: "Mint next ticket" })).toBeDisabled();
@@ -167,7 +164,7 @@ describe("MintTicketsPanel", () => {
 
   it("does not offer more tickets than the tier holds", async () => {
     mockApi({ listings: [eventMints([MINTED], 1, 1)] });
-    render(<MintTicketsPanel events={EVENTS} issuerAddress={ISSUER} />);
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
     expect(await screen.findByRole("button", { name: "All tickets minted" })).toBeDisabled();
   });
 
@@ -176,7 +173,7 @@ describe("MintTicketsPanel", () => {
       listings: [eventMints([])],
       mint: () => json({ error: { code: "FORBIDDEN", message: "Only the event's seller can mint" } }, 403),
     });
-    render(<MintTicketsPanel events={EVENTS} issuerAddress={ISSUER} />);
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
     await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Only the event's seller can mint");
   });
@@ -191,7 +188,7 @@ describe("MintTicketsPanel", () => {
         return json({ ticket: ticket(), request: txRequest("PENDING"), metadataPublic: true }, 201);
       },
     });
-    render(<MintTicketsPanel events={EVENTS} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
     await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server");
     await userEvent.click(screen.getByRole("button", { name: "Mint next ticket" }));
@@ -204,8 +201,20 @@ describe("MintTicketsPanel", () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
-  it("explains when there is nothing to mint for", () => {
-    render(<MintTicketsPanel events={[]} issuerAddress={ISSUER} />);
-    expect(screen.getByText(/You have no events yet/)).toBeVisible();
+  it("explains when the event has no tiers yet", async () => {
+    mockApi({ listings: [{ eventId: EVENT, title: "Testnet Tones Live", tiers: [] }] });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+    expect(await screen.findByText("This event has no ticket tiers yet.")).toBeVisible();
+  });
+
+  it("reloads the tiers when the page's tiers change", async () => {
+    const fetchMock = mockApi({ listings: [eventMints([]), eventMints([], 0, 80)] });
+    const { rerender } = render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} tiersVersion="a" />);
+    await screen.findByText("2.5 XRP · Minted 0 of 50");
+    rerender(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} tiersVersion="b" />);
+    expect(await screen.findByText("2.5 XRP · Minted 0 of 80")).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === `/api/events/${EVENT}/mints`)).toHaveLength(
+      2,
+    );
   });
 });

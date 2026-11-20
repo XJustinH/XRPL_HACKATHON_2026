@@ -6,15 +6,16 @@ approved and recorded is in [docs/xrpl/ticket-nft.md](../../../docs/xrpl/ticket-
 
 | File | What |
 |---|---|
-| `mint-tickets-panel.tsx` | Event picker, tiers with "Mint next ticket", the Xaman approval, and each ticket's status with NFT and transaction explorer links |
+| `mint-tickets-panel.tsx` | One event's tiers with "Mint next ticket", the Xaman approval, and each ticket's status with NFT and transaction explorer links |
 
-Usage (server component, signed-in seller). `issuerAddress` is the session's proven wallet (XRPL-012); when it
-is null the panel links to `/connect` instead of minting:
+Usage: Agent C's event page (`/seller/events/:id`, a server component) renders it for the event's owner.
+`issuerAddress` is the session's proven wallet (XRPL-012); when it is null the panel links to `/connect`
+instead of minting. `tiersVersion` should change when the tiers do, so the list reloads:
 
 ```tsx
-const events = await listSellerEventsForMinting(getDb(), session.userId); // @/lib/xrpl/tickets/minting
-return <MintTicketsPanel events={events} issuerAddress={session.walletAddress} />;
+<MintTicketsPanel
+  eventId={event.id}
+  issuerAddress={session.walletAddress}
+  tiersVersion={event.tiers.map((tier) => `${tier.id}:${tier.totalSupply}`).join("|")}
+/>
 ```
-
-It is currently shown on `/seller/events` below Agent C's placeholder. Agent C can move it into the event
-management screens (XRPL-015/016) as long as it only renders for the event's seller.

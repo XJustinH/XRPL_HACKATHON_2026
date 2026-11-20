@@ -10,6 +10,7 @@ import { isEventOwner } from "@/lib/auth/permissions";
 import { getEventView } from "@/features/events/event-store";
 import { formatEventDate } from "@/features/events/event-formatting";
 import { TierManager } from "@/features/events/tier-manager";
+import { MintTicketsPanel } from "@/features/minting/mint-tickets-panel";
 
 export const metadata = { title: "Event setup" };
 
@@ -87,6 +88,15 @@ export default async function SellerEventPage({
       </div>
 
       <TierManager event={event} />
+
+      {/* Ticket minting (XRPL-024, Agent B). The mint routes enforce ownership and the proven wallet. */}
+      <div className="mt-8">
+        <MintTicketsPanel
+          eventId={event.id}
+          issuerAddress={session.walletAddress}
+          tiersVersion={event.tiers.map((tier) => `${tier.id}:${tier.totalSupply}`).join("|")}
+        />
+      </div>
 
       <p className="mt-8 text-sm text-muted">
         Setting a price and quantity reserves nothing on the ledger. Tickets become NFTs
