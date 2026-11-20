@@ -23,13 +23,20 @@ describe("readProfileSettings", () => {
       websiteUrl: "https://example.com",
       imageUrl: "https://example.com/a.png",
       socialLinks: [{ label: "Instagram", url: "https://instagram.com/x" }],
-      interests: ["techno", "jazz"],
+      interests: ["MUSIC", "COMEDY"],
       visibility: "PRIVATE",
     });
     expect(settings.bio).toBe("We put on shows.");
     expect(settings.city).toBe("Dublin");
-    expect(settings.interests).toEqual(["techno", "jazz"]);
+    expect(settings.interests).toEqual(["MUSIC", "COMEDY"]);
     expect(settings.visibility).toBe("PRIVATE");
+  });
+
+  it("drops a stored interest this version no longer recognises", () => {
+    // A category that was renamed or removed must not break the profile read.
+    expect(
+      readProfileSettings({ interests: ["MUSIC", "TECHNO_LEGACY", 42, null] }).interests,
+    ).toEqual(["MUSIC"]);
   });
 
   it("salvages the valid fields when one is corrupt", () => {
@@ -102,12 +109,23 @@ describe("mergeProfileSettings", () => {
     expect(() => mergeProfileSettings({}, { visibility: "SEMI_PUBLIC" })).toThrow();
   });
 
-  it("drops blank interests and trims the rest", () => {
-    expect(mergeProfileSettings({}, { interests: [" techno ", "jazz"] }).interests).toEqual([
-      "techno",
-      "jazz",
+  it("stores interests from the fixed vocabulary", () => {
+    expect(mergeProfileSettings({}, { interests: ["MUSIC", "COMEDY"] }).interests).toEqual([
+      "MUSIC",
+      "COMEDY",
     ]);
+  });
+
+  it("rejects an interest outside the vocabulary rather than storing free text", () => {
+    // Free text could never be matched against an event later.
+    expect(() => mergeProfileSettings({}, { interests: ["techno"] })).toThrow();
     expect(() => mergeProfileSettings({}, { interests: ["  "] })).toThrow();
+  });
+
+  it("accepts an empty interest list, which is how preferences are cleared", () => {
+    expect(mergeProfileSettings({ interests: ["MUSIC"] }, { interests: [] }).interests).toEqual(
+      [],
+    );
   });
 
   it("starts from defaults when there is nothing stored", () => {

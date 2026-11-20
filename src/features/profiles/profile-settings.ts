@@ -1,5 +1,18 @@
 import { z } from "zod";
-import { ProfileVisibility, SocialLink } from "@/contracts";
+import { EVENT_CATEGORIES, EventCategory, ProfileVisibility, SocialLink } from "@/contracts";
+
+/**
+ * Stored interests, filtered to the categories this version knows about.
+ *
+ * A selection saved against a category that has since been renamed or removed
+ * is dropped rather than failing the whole profile read, so an old preference
+ * never blocks a page from rendering.
+ */
+const StoredInterests = z
+  .array(z.unknown())
+  .transform((values) =>
+    values.filter((value): value is EventCategory => EventCategory.safeParse(value).success),
+  );
 
 /**
  * Typed view of the non-sensitive preferences stored in `User.settings`.
@@ -23,7 +36,7 @@ export const ProfileSettings = z.object({
   websiteUrl: z.string().nullable().default(null),
   imageUrl: z.string().nullable().default(null),
   socialLinks: z.array(SocialLink).max(6).default([]),
-  interests: z.array(z.string().max(40)).max(12).default([]),
+  interests: StoredInterests.default([]),
   visibility: ProfileVisibility.default("PUBLIC"),
 });
 export type ProfileSettings = z.infer<typeof ProfileSettings>;
@@ -62,7 +75,7 @@ export function readProfileSettings(settings: unknown): ProfileSettings {
     websiteUrl: field("websiteUrl", z.string().nullable(), null),
     imageUrl: field("imageUrl", z.string().nullable(), null),
     socialLinks: field("socialLinks", z.array(SocialLink).max(6), []),
-    interests: field("interests", z.array(z.string().max(40)).max(12), []),
+    interests: field("interests", StoredInterests, []),
     visibility: field("visibility", ProfileVisibility, "PUBLIC"),
   };
 }
@@ -100,7 +113,10 @@ export function mergeProfileSettings(
     next.socialLinks = SocialLink.array().max(6).parse(patch.socialLinks);
   }
   if (patch.interests !== undefined) {
-    next.interests = z.array(z.string().trim().min(1).max(40)).max(12).parse(patch.interests);
+    next.interests = z
+      .array(EventCategory)
+      .max(EVENT_CATEGORIES.length)
+      .parse(patch.interests);
   }
   if (patch.visibility !== undefined) {
     next.visibility = ProfileVisibility.parse(patch.visibility);
