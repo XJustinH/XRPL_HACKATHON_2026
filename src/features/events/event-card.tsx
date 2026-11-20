@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { EventView } from "@/contracts";
+import { safeExternalUrl, type EventView } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
 import { formatEventDate, formatXrp, lowestPriceDrops } from "./event-formatting";
 
@@ -13,16 +13,18 @@ import { formatEventDate, formatXrp, lowestPriceDrops } from "./event-formatting
  */
 export function EventCard({ event }: { event: EventView }) {
   const fromPrice = lowestPriceDrops(event.tiers);
+  // Re-checked at render: a row may predate the scheme restriction.
+  const artworkUrl = safeExternalUrl(event.artworkUrl);
   const totalSupply = event.tiers.reduce((sum, tier) => sum + tier.totalSupply, 0);
 
   return (
     <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition-colors hover:border-accent">
       <Link href={`/events/${event.id}`} className="block focus-visible:outline-none">
         <div className="aspect-[16/9] w-full overflow-hidden bg-surface">
-          {event.artworkUrl ? (
+          {artworkUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host
             <img
-              src={event.artworkUrl}
+              src={artworkUrl}
               alt=""
               loading="lazy"
               className="size-full object-cover"

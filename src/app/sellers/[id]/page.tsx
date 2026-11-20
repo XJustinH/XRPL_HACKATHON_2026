@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import type { SellerProfile } from "@/contracts";
+import { safeExternalUrl, type SellerProfile } from "@/contracts";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
@@ -37,12 +37,23 @@ function hostOf(url: string): string {
 }
 
 function ProfileHeader({ profile }: { profile: SellerProfile }) {
+  /*
+   * Stored values are re-checked before rendering. Validation on write is the
+   * main defence, but a row written before that rule existed must not put a
+   * `javascript:` URL into an href on a public page.
+   */
+  const imageUrl = safeExternalUrl(profile.imageUrl);
+  const websiteUrl = safeExternalUrl(profile.websiteUrl);
+  const socialLinks = profile.socialLinks
+    .map((link) => ({ label: link.label, url: safeExternalUrl(link.url) }))
+    .filter((link): link is { label: string; url: string } => link.url !== null);
+
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
       <div className="size-20 shrink-0 overflow-hidden rounded-full bg-surface">
-        {profile.imageUrl ? (
+        {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host
-          <img src={profile.imageUrl} alt="" className="size-full object-cover" />
+          <img src={imageUrl} alt="" className="size-full object-cover" />
         ) : (
           <div
             aria-hidden="true"
@@ -66,21 +77,21 @@ function ProfileHeader({ profile }: { profile: SellerProfile }) {
           <p className="mt-3 max-w-2xl whitespace-pre-line text-sm">{profile.bio}</p>
         ) : null}
 
-        {profile.websiteUrl || profile.socialLinks.length > 0 ? (
+        {websiteUrl || socialLinks.length > 0 ? (
           <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-            {profile.websiteUrl ? (
+            {websiteUrl ? (
               <li>
                 <a
-                  href={profile.websiteUrl}
+                  href={websiteUrl}
                   target="_blank"
                   rel="noreferrer noopener nofollow ugc"
                   className="text-accent underline"
                 >
-                  {hostOf(profile.websiteUrl)}
+                  {hostOf(websiteUrl)}
                 </a>
               </li>
             ) : null}
-            {profile.socialLinks.map((link) => (
+            {socialLinks.map((link) => (
               <li key={link.url}>
                 <a
                   href={link.url}

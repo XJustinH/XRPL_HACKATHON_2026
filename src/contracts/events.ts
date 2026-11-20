@@ -17,6 +17,54 @@ import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, TxHash, XrplAddress }
 import { EventStatus, OfferKind, OfferState } from "./entities";
 
 /* ------------------------------------------------------------------ *
+ * User-supplied URLs
+ * ------------------------------------------------------------------ */
+
+/** Schemes that are safe to put in an `href` or an `img src`. */
+const SAFE_URL_PROTOCOLS = new Set(["http:", "https:"]);
+
+/**
+ * A user-supplied web address, restricted to http and https.
+ *
+ * `z.url()` alone is **not** sufficient here: it accepts `javascript:`,
+ * `data:`, `vbscript:` and `file:` URLs, all of which are valid URLs and none
+ * of which are safe to render into an anchor on a public page. A seller's
+ * profile link is attacker-controlled content as far as a visitor is concerned.
+ *
+ * Worth promoting to `./common` if another slice takes user-supplied URLs.
+ */
+export const HttpUrl = z
+  .url("Enter a valid web address")
+  .refine((value) => {
+    try {
+      return SAFE_URL_PROTOCOLS.has(new URL(value).protocol);
+    } catch {
+      return false;
+    }
+  }, "Links must start with http:// or https://");
+export type HttpUrl = z.infer<typeof HttpUrl>;
+
+/** `HttpUrl`, or an empty string meaning "cleared". */
+export const OptionalHttpUrl = z.union([HttpUrl, z.literal("")]);
+
+/**
+ * Returns a URL only when it is safe to render, otherwise null.
+ *
+ * Validation on write is the main defence; this is the second one, for values
+ * that were stored before the rule existed or written by something other than
+ * these forms. Rendering code should never pass a stored URL straight to an
+ * `href`.
+ */
+export function safeExternalUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return SAFE_URL_PROTOCOLS.has(new URL(value).protocol) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Ticket tiers (XRPL-016)
  * ------------------------------------------------------------------ */
 
@@ -54,7 +102,7 @@ export const EventDraftInput = z.object({
   endsAt: IsoDateTime.nullable().default(null),
   venue: z.string().trim().min(1, "Venue is required").max(160),
   city: z.string().trim().min(1, "City is required").max(80),
-  artworkUrl: z.union([z.url("Artwork must be a valid URL"), z.literal("")]).optional(),
+  artworkUrl: OptionalHttpUrl.optional(),
 });
 export type EventDraftInput = z.infer<typeof EventDraftInput>;
 
@@ -249,7 +297,7 @@ export type EventQuery = z.infer<typeof EventQuery>;
 
 export const SocialLink = z.object({
   label: z.string().trim().min(1).max(40),
-  url: z.url("Must be a valid URL"),
+  url: HttpUrl,
 });
 export type SocialLink = z.infer<typeof SocialLink>;
 
@@ -260,9 +308,9 @@ export const SellerProfilePatch = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),
   bio: z.string().trim().max(1_000).optional(),
   city: z.string().trim().max(80).optional(),
-  websiteUrl: z.union([z.url(), z.literal("")]).optional(),
+  websiteUrl: OptionalHttpUrl.optional(),
   /** Profile image. Stored as a URL; media hosting itself is XRPL-071. */
-  imageUrl: z.union([z.url(), z.literal("")]).optional(),
+  imageUrl: OptionalHttpUrl.optional(),
   socialLinks: z.array(SocialLink).max(6).optional(),
 });
 export type SellerProfilePatch = z.infer<typeof SellerProfilePatch>;
