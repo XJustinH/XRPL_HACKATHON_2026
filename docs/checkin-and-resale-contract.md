@@ -1,8 +1,9 @@
 # Check-in and resale policy contract (Agent D)
 
 Covers XRPL-044, 045, 046, 047 (check-in) and XRPL-037 (in-app resale policy).
-Status: **core logic, Prisma store and tests done. Route handlers wait on wallet auth (XRPL-012),
-roles (XRPL-013) and Agent B's ledger reads (XRPL-028).**
+Status: **core logic, Prisma store and the four `/api/checkin/*` routes are done.** Two inputs are
+not connected yet, so those steps answer `503` instead of guessing: wallet-proof verification
+(XRPL-012) and XRPL ownership reads (Agent B, PR #110). See "Wiring status".
 
 | File | What it is |
 |---|---|
@@ -10,6 +11,10 @@ roles (XRPL-013) and Agent B's ledger reads (XRPL-028).**
 | [`src/features/checkin/checkin-service.ts`](../src/features/checkin/checkin-service.ts) | Challenge, proof, verify and atomic admit |
 | [`src/features/checkin/prisma-store.ts`](../src/features/checkin/prisma-store.ts) | `CheckInStore` / `TicketDirectory` on the XRPL-005 schema |
 | [`src/features/checkin/ports.ts`](../src/features/checkin/ports.ts) | Interfaces other agents implement |
+| [`src/features/checkin/xrpl-ownership.ts`](../src/features/checkin/xrpl-ownership.ts) | Adapter for Agent B's `verifyOwner` |
+| [`src/features/checkin/organiser-access.ts`](../src/features/checkin/organiser-access.ts) | Interim "who may scan" rule |
+| [`src/features/checkin/server.ts`](../src/features/checkin/server.ts) | Route wiring and QR secret |
+| [`src/app/api/checkin/`](../src/app/api/checkin/) | Route handlers |
 | [`src/lib/resale-policy/resale-policy.ts`](../src/lib/resale-policy/resale-policy.ts) | `ResalePolicyPort` implementation |
 
 Tests: `npm test` (unit, in-memory fakes) and `npm run test:db` (Prisma store against Postgres).
@@ -24,15 +29,15 @@ sequenceDiagram
   participant O as Organiser scanner
   participant L as XRPL (Agent B)
   A->>API: POST /api/checkin/challenges {ticketId}
-  API->>L: getOwner(nftokenId) == session wallet?
+  API->>L: verifyOwner(nftokenId, session wallet)
   API-->>A: qrPayload, messageToSign, expiresAt (2 min)
   A->>W: sign messageToSign
   A->>API: POST /api/checkin/challenges/:id/prove {proof}
   O->>API: POST /api/checkin/verify {qrPayload, eventId}
-  API->>L: getOwner(nftokenId)
+  API->>L: verifyOwner(nftokenId, wallet)
   API-->>O: VERIFIED or reason (read-only)
   O->>API: POST /api/checkin/confirm {qrPayload, eventId}
-  API->>L: getOwner(nftokenId) again
+  API->>L: verifyOwner(nftokenId, wallet) again
   API-->>O: ADMITTED once, otherwise ALREADY_USED
 ```
 
@@ -93,12 +98,32 @@ Failures use the standard envelope `{ error: { code: <status>, message }, reques
 |---|---|---|
 | A (XRPL-012) | Session with a **verified** wallet address | `issueChallenge` (never from the request body) |
 | A/B (XRPL-012) | `WalletProofVerifier.verify(message, proof)`, e.g. Xaman SignIn | `proveControl` |
-| A (XRPL-013) | `OrganiserAccess.canScanEvent(userId, eventId)` | Scanner routes |
-| B (XRPL-028) | `LedgerOwnership.getOwner` from a validated ledger; throw `LedgerUnavailableError` on failure | Gate checks |
+| A (XRPL-013) | Role check to replace the interim rule in `organiser-access.ts` | Scanner routes |
+| B (XRPL-007, PR #110) | `verifyOwner(nftokenId, address)` on a validated ledger, already adapted in `xrpl-ownership.ts` | Gate checks |
 | A (XRPL-020) | Real `InventoryPort.getAvailability` | Resale policy |
 | B (XRPL-036) | Real `OfferPort.listResaleOffers` (live offers only) | Resale listings |
 | C (XRPL-034) | Ticket view renders `qrPayload` as a QR with an "Approve in wallet" step, refreshing at `expiresAt` | Attendee side |
-| A (env) | Add `CHECKIN_QR_SECRET` (server-only, 32+ chars) to `src/lib/env.ts` and `.env.example` | QR tags |
+| A (env) | Add `CHECKIN_QR_SECRET` (server-only, 32+ chars) to `src/lib/env.ts` and `.env.example`. Until then the key is derived from `SESSION_SECRET` | QR tags |
 
-Next for Agent D: route handlers for §5.4, the organiser scanner UI (XRPL-048) and the
-edge-case suite (XRPL-049).
+## Routes
+
+All are `POST`, need a session cookie, and are same-origin only (CSRF check in `withApiHandler`).
+
+| Route | Body | Who | Success |
+|---|---|---|---|
+| `/api/checkin/challenges` | `{ ticketId }` | Attendee with a **verified** wallet (else 403 `WALLET_NOT_VERIFIED`) | 201 challenge + `qrPayload` + `messageToSign` |
+| `/api/checkin/challenges/:id/prove` | `{ proof }` | Attendee | 200 `PROVEN` |
+| `/api/checkin/verify` | `{ qrPayload, eventId }` | Organiser | 200 `VERIFIED` (read-only) |
+| `/api/checkin/confirm` | `{ qrPayload, eventId }` | Organiser | 201 `ADMITTED`; repeat gives 409 `ALREADY_USED`, so retries are safe |
+
+## Wiring status (`src/features/checkin/server.ts`)
+
+| Input | Now | Switch to |
+|---|---|---|
+| Tickets, challenges, check-ins | Prisma (live) | — |
+| Who may scan | Interim: the event's own seller (SELLER/ORGANISER role) | Agent A's role check (XRPL-013) |
+| XRPL ownership | `unavailableLedger` → 503 `LEDGER_UNAVAILABLE` | `new XrplLedgerOwnership(getXrplQueryService())` once PR #110 merges |
+| Wallet proof | `unavailableProofs` → 503 | Agent A/B verifier (XRPL-012) |
+| QR key | `CHECKIN_QR_SECRET`, else derived from `SESSION_SECRET`, else (dev only) random per process | — |
+
+Next for Agent D: the organiser scanner UI (XRPL-048) and the edge-case suite (XRPL-049).

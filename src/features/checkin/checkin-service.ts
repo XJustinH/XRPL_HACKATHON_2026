@@ -25,8 +25,8 @@ import type { XrplAddress } from "@/contracts/common";
 import {
   type CheckInStore,
   type Clock,
-  type LedgerOwner,
   type LedgerOwnership,
+  type OwnershipCheck,
   type OrganiserAccess,
   type StoredChallenge,
   type TicketDirectory,
@@ -54,7 +54,7 @@ export type CheckInServiceOptions = {
 };
 
 type ScanInput = { qrPayload: string; organiserId: string; gateEventId: string };
-type Checked = { challenge: StoredChallenge; nftokenId: string; owner: LedgerOwner };
+type Checked = { challenge: StoredChallenge; nftokenId: string; ledgerIndex: number | null };
 
 const fail = (status: CheckInFailureStatus, message: string): CheckInFailure => ({ status, message });
 const isFailure = (x: object): x is CheckInFailure => "status" in x;
@@ -85,11 +85,9 @@ export class CheckInService {
       return fail("ALREADY_USED", "This ticket has already been used to enter the event.");
     }
 
-    const owner = await this.readOwner(ticket.nftokenId);
+    const owner = await this.checkOwner(ticket.nftokenId, input.walletAddress);
     if (isFailure(owner)) return owner;
-    if (owner.ownerAddress !== input.walletAddress) {
-      return fail("WRONG_OWNER", "Your linked wallet does not currently hold this ticket.");
-    }
+    if (!owner.owns) return fail("WRONG_OWNER", "Your linked wallet does not currently hold this ticket.");
 
     const challenge: StoredChallenge = {
       id: randomUUID(),
@@ -140,15 +138,15 @@ export class CheckInService {
   async verifyScan(input: ScanInput): Promise<CheckInVerification> {
     const checked = await this.runChecks(input);
     if (isFailure(checked)) return checked;
-    const { challenge, nftokenId, owner } = checked;
+    const { challenge, nftokenId, ledgerIndex } = checked;
     return {
       status: "VERIFIED",
       challengeId: challenge.id,
       ticketId: challenge.ticketId,
       eventId: challenge.eventId,
       nftokenId,
-      ownerAddress: owner.ownerAddress,
-      ledgerIndex: owner.ledgerIndex,
+      ownerAddress: challenge.walletAddress,
+      ledgerIndex,
     };
   }
 
@@ -156,7 +154,7 @@ export class CheckInService {
   async admit(input: ScanInput): Promise<CheckInResult> {
     const checked = await this.runChecks(input);
     if (isFailure(checked)) return checked;
-    const { challenge, owner } = checked;
+    const { challenge, ledgerIndex } = checked;
 
     const scannedAt = this.clock.now();
     const outcome = await this.deps.store.admitAtomically({
@@ -164,8 +162,8 @@ export class CheckInService {
       eventId: challenge.eventId,
       challengeId: challenge.id,
       organiserId: input.organiserId,
-      walletAddress: owner.ownerAddress,
-      verifiedLedgerIndex: owner.ledgerIndex,
+      walletAddress: challenge.walletAddress,
+      verifiedLedgerIndex: ledgerIndex,
       scannedAt,
     });
     if (outcome !== "ADMITTED") return fail("ALREADY_USED", "This ticket has already been checked in.");
@@ -174,7 +172,7 @@ export class CheckInService {
       ticketId: challenge.ticketId,
       eventId: challenge.eventId,
       checkedInAt: scannedAt.toISOString(),
-      ledgerIndex: owner.ledgerIndex,
+      ledgerIndex,
     };
   }
 
@@ -205,17 +203,15 @@ export class CheckInService {
       return fail("PROOF_REQUIRED", "The attendee has not approved this check-in in their wallet.");
     }
 
-    const owner = await this.readOwner(ticket.nftokenId);
+    const owner = await this.checkOwner(ticket.nftokenId, challenge.walletAddress);
     if (isFailure(owner)) return owner;
-    if (owner.ownerAddress !== challenge.walletAddress) {
-      return fail("WRONG_OWNER", "This ticket is no longer held by the wallet that presented it.");
-    }
-    return { challenge, nftokenId: ticket.nftokenId, owner };
+    if (!owner.owns) return fail("WRONG_OWNER", "This ticket is no longer held by the wallet that presented it.");
+    return { challenge, nftokenId: ticket.nftokenId, ledgerIndex: owner.ledgerIndex };
   }
 
-  private async readOwner(nftokenId: string): Promise<LedgerOwner | CheckInFailure> {
+  private async checkOwner(nftokenId: string, address: XrplAddress): Promise<OwnershipCheck | CheckInFailure> {
     try {
-      return (await this.deps.ledger.getOwner(nftokenId)) ?? fail("UNKNOWN_TICKET", "Ticket NFT not found on the XRP Ledger.");
+      return await this.deps.ledger.checkOwner(nftokenId, address);
     } catch (err) {
       if (err instanceof LedgerUnavailableError) {
         return fail("LEDGER_UNAVAILABLE", "Could not reach the XRP Ledger to confirm ownership. Do not admit; retry.");
