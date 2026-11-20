@@ -618,3 +618,39 @@ export const OfferStatus = z.object({
   nftExplorerUrl: z.string(),
 });
 export type OfferStatus = z.infer<typeof OfferStatus>;
+
+// ---------------------------------------------------------------------------
+// Ticket ownership (XRPL-028)
+// ---------------------------------------------------------------------------
+
+/**
+ * Who holds a ticket's NFT, as read from a validated ledger.
+ * - VERIFIED: the owner was read from a validated ledger.
+ * - PENDING: it could not be verified right now (ledger unreachable, or the NFT moved to a wallet
+ *   the app has not seen). Never treat a PENDING ticket as owned by anyone.
+ * - NOT_MINTED: the ticket has no NFT yet. BURNED: the NFT no longer exists.
+ */
+export const TicketOwnershipStatus = z.enum(["VERIFIED", "PENDING", "NOT_MINTED", "BURNED"]);
+export type TicketOwnershipStatus = z.infer<typeof TicketOwnershipStatus>;
+
+/** Response of `GET /api/tickets/:id/ownership`. */
+export const TicketOwnership = z.object({
+  ticketId: AppId,
+  nftokenId: NFTokenId.nullable(),
+  status: TicketOwnershipStatus,
+  /** The verified owner; null unless VERIFIED. */
+  ownerAddress: XrplAddress.nullable(),
+  /** Validated ledger the answer came from. */
+  ledgerIndex: z.number().int().nullable(),
+  checkedAt: IsoDateTime,
+  /** The owner the app had on record before this check. */
+  previousOwnerAddress: XrplAddress.nullable(),
+  /** True when the verified owner differs from the one on record (a sale or transfer happened). */
+  changed: z.boolean(),
+  /** True when the requester's proven wallet is the verified owner. */
+  ownedByViewer: z.boolean(),
+  /** Why ownership is PENDING or BURNED, for the buyer-facing message. */
+  detail: z.string().nullable(),
+  nftExplorerUrl: z.string().nullable(),
+});
+export type TicketOwnership = z.infer<typeof TicketOwnership>;
