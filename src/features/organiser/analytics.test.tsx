@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { EventMetrics } from "@/contracts/checkin";
 import { CheckInTimeline, niceTicks } from "./checkin-timeline";
 import { bucketCheckIns } from "./metrics";
-import { MetricTiles, metricTiles } from "./metric-tiles";
+import { MetricTiles, PendingActivity, metricTiles } from "./metric-tiles";
 
 const at = (hhmm: string) => new Date(`2026-12-01T${hhmm}:00.000Z`);
 
@@ -51,6 +51,7 @@ const metrics: EventMetrics = {
   gifts: 2,
   checkedIn: 3,
   notCheckedIn: 1,
+  pending: { purchases: 2, listings: 1, mints: 0 },
   checkInTimeline: [
     { start: "2026-12-01T20:00:00.000Z", count: 2 },
     { start: "2026-12-01T20:05:00.000Z", count: 0 },
@@ -80,6 +81,21 @@ describe("MetricTiles", () => {
     render(<MetricTiles metrics={metrics} />);
     expect(screen.getByText("Primary revenue")).toBeInTheDocument();
     expect(screen.getByText("17.5 XRP")).toBeInTheDocument();
+  });
+});
+
+describe("PendingActivity", () => {
+  it("lists pending items separately from confirmed figures", () => {
+    render(<PendingActivity pending={metrics.pending} />);
+    const section = screen.getByRole("region", { name: "Waiting for the XRP Ledger" });
+    expect(section).toHaveTextContent("Not counted in the figures above");
+    expect(within(section).getByText("Purchases awaiting confirmation").nextSibling).toHaveTextContent("2");
+    expect(within(section).getByText("Listings awaiting wallet signature").nextSibling).toHaveTextContent("1");
+  });
+
+  it("says when nothing is pending", () => {
+    render(<PendingActivity pending={{ purchases: 0, listings: 0, mints: 0 }} />);
+    expect(screen.getByText("Nothing pending right now.")).toBeInTheDocument();
   });
 });
 

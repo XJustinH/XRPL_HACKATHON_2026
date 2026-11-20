@@ -18,8 +18,15 @@ vi.mock("@/lib/auth/session", async () => {
 const db = {
   event: { findUnique: async () => ({ sellerId, seller: { role: "SELLER" } }) },
   ticketTier: { aggregate: async () => ({ _sum: { totalSupply: 4 } }) },
-  ticketNFT: { count: async () => 2 },
-  nFTOffer: { findMany: async () => [{ kind: "PRIMARY", amountDrops: "2500000" }, { kind: "RESALE", amountDrops: "4000000" }] },
+  ticketNFT: {
+    count: async ({ where }: { where: { mintStatus?: unknown } }) => (where.mintStatus ? 1 : 2),
+    findMany: async () => [{ id: "t1" }, { id: "t2" }],
+  },
+  nFTOffer: {
+    findMany: async () => [{ kind: "PRIMARY", amountDrops: "2500000" }, { kind: "RESALE", amountDrops: "4000000" }],
+    count: async () => 1,
+  },
+  ledgerTransaction: { count: async () => 3 },
   checkInRecord: { findMany: async () => [{ scannedAt: new Date("2026-12-01T20:02:00Z") }] },
 };
 vi.mock("@/lib/db/client", () => ({ getDb: () => db }));
@@ -47,6 +54,7 @@ describe("GET /api/organisers/events/:id/metrics", () => {
       resaleVolumeDrops: "4000000",
       checkedIn: 1,
       notCheckedIn: 1,
+      pending: { purchases: 3, listings: 1, mints: 1 },
     });
   });
 

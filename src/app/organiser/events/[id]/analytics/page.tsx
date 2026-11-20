@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EventSellerAccess } from "@/features/checkin/organiser-access";
 import { CheckInTimeline } from "@/features/organiser/checkin-timeline";
 import { OrganiserEventTabs } from "@/features/organiser/event-tabs";
-import { MetricTiles } from "@/features/organiser/metric-tiles";
+import { MetricTiles, PendingActivity } from "@/features/organiser/metric-tiles";
 import { getEventMetrics } from "@/features/organiser/metrics";
 import { NotYourEvent, SignInToManage } from "@/features/organiser/organiser-page-guard";
 import { RefreshButton } from "@/features/organiser/refresh-button";
@@ -36,6 +36,7 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ id: 
       <OrganiserEventTabs eventId={eventId} current="analytics" />
 
       <MetricTiles metrics={metrics} />
+      <PendingActivity pending={metrics.pending} />
 
       <section aria-labelledby="entry-rate-heading" className="mt-8 rounded-card border border-border bg-surface-raised p-5">
         <h2 id="entry-rate-heading" className="text-lg font-semibold">
@@ -46,8 +47,8 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ id: 
       </section>
 
       <p className="mt-6 text-sm text-muted">
-        Only activity validated on the XRP Ledger is counted: sales and resales once the purchase transaction is
-        validated, check-ins once admitted at the door. Resales and transfers made outside this app are not included.
+        The figures count only activity validated on the XRP Ledger: sales and resales once the purchase transaction
+        is validated, check-ins once admitted at the door. Anything still waiting is shown separately. Resales and transfers made outside this app are not included.
         Updated {new Date(metrics.calculatedAt).toUTCString()}.
       </p>
     </>

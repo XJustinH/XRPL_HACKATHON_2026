@@ -178,6 +178,7 @@ seller only.
 | Private transfers / gifts | `PRIVATE` / `GIFT` offers `ACCEPTED` |
 | Checked in / not checked in | `CheckInRecord` count; sold − checked in |
 | Check-ins over time | `CheckInRecord.scannedAt` in 5–1440-minute buckets (≤ 32 bars, empty buckets kept) |
+| **Pending (separate, never added to the above)** | `LedgerTransaction` `NFTokenAcceptOffer` still `PENDING` for this event's tickets; offers in `PENDING_SIGNATURE`; tickets `PENDING`/`SUBMITTED` |
 
 The chart has one series, so no legend. It has a hover and focus tooltip on every bar, and a
 "Show as table" view. Bar colour is `#1d4ed8` in light mode and `#5f88ee` in dark mode, both passing
