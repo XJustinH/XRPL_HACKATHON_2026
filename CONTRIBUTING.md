@@ -40,7 +40,7 @@ Each directory has one owning agent/person. See the README in each `src/` folder
 - **Database schema and migrations (`prisma/`)** belong to Agent A. To add or change a model, open an
   issue or PR comment titled `Schema request: …` describing the fields, constraints and the issue it
   unblocks. Do not create migrations on feature branches.
-- **Shared contracts (`src/contracts/`)**: feature owners write `src/contracts/<domain>.ts`, and Agent A approves
+- **Shared contracts (`src/contracts/`)**: shared primitives (drops, addresses, ledger IDs, envelope) live in `common.ts`; do not redeclare them in a slice. Feature owners write `src/contracts/<domain>.ts`, and Agent A approves
   exports from `src/contracts/index.ts`. Merge contract changes before the code that consumes them.
 - **XRPL / wallet code (`src/lib/xrpl/`)** belongs to Agent B. Other code calls B's typed functions and never
   imports `xrpl` or the wallet SDK directly.
