@@ -72,12 +72,15 @@ These steps work on any host that runs Node.js and can reach a Postgres 17 datab
 
 ## Preview deployment (Vercel + Neon)
 
-**Preview URL:** not live yet. It needs the one-time setup below, which only the repository owner can do.
-This section will record the production URL once it exists.
+**Live.** Production: <https://xrpl-hackathon-2026-tricket.vercel.app> (Vercel team `tricket`, project
+`xrpl-hackathon-2026`). Check it with `/api/health`.
 
-Once connected, Vercel builds every pull request and posts its own preview URL on the PR, and every push to
-`main` updates the production URL. Neon gives each preview its own copy of the database (a branch of the
-default database), so a PR's migrations can't break other previews.
+Vercel builds every pull request and comments its preview URL on the PR, and every push to `main` updates
+production. Neon gives each preview its own copy of the database (a branch of the default database), so a
+PR's migrations can't break other previews. Vercel reports each deployment as the "Vercel" status on the
+commit; it doesn't create GitHub deployments.
+
+The one-time setup below is done. It stays here for reference.
 
 ### What the repository already does
 
