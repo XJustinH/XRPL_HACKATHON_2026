@@ -100,64 +100,45 @@ describe("EventDetailsForm", () => {
   describe("once tickets are minted", () => {
     const minted = event({ tiers: [tier(5)], status: "PUBLISHED" });
 
-    it("freezes the fields written into NFT metadata", () => {
+    it("freezes every field written into NFT metadata, description included", () => {
       render(<EventDetailsForm event={minted} />);
-      for (const label of ["Event name", "Starts", "Ends", "Venue", "City", "Artwork URL"]) {
+      for (const label of [
+        "Event name",
+        "Description",
+        "Starts",
+        "Ends",
+        "Venue",
+        "City",
+        "Artwork URL",
+      ]) {
         expect(screen.getByLabelText(label), `${label} must be frozen`).toBeDisabled();
       }
     });
 
-    it("keeps the description editable and explains the restriction", () => {
+    it("explains why the details are fixed", () => {
       render(<EventDetailsForm event={minted} />);
-      expect(screen.getByLabelText("Description")).toBeEnabled();
       expect(screen.getByText(/already on the ledger/)).toBeVisible();
+      expect(screen.getByText(/cannot be rewritten/)).toBeVisible();
     });
 
-    it("sends only the description, never a frozen field", async () => {
-      const user = userEvent.setup();
+    it("offers no save button, since nothing is editable", () => {
+      // A visible control that can only ever submit an empty patch is worse
+      // than no control.
       render(<EventDetailsForm event={minted} />);
-
-      await user.clear(screen.getByLabelText("Description"));
-      await user.type(screen.getByLabelText("Description"), "Updated blurb");
-      await user.click(save());
-
-      const [, init] = requestJson.mock.calls[0]!;
-      expect(init.body).toEqual({ description: "Updated blurb" });
-      expect(init.body).not.toHaveProperty("title");
-      expect(init.body).not.toHaveProperty("startsAt");
+      expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
     });
 
-    it("does not send endsAt when only the description changed", async () => {
-      // EventPatch defaults endsAt to null, which would read as clearing a set
-      // end time and be refused as a frozen-field change.
-      const withEnd = event({
-        tiers: [tier(5)],
-        endsAt: "2099-12-01T23:30:00.000Z",
-      });
-      const user = userEvent.setup();
-      render(<EventDetailsForm event={withEnd} />);
-
-      await user.type(screen.getByLabelText("Description"), " extra");
-      await user.click(save());
-
-      const [, init] = requestJson.mock.calls[0]!;
-      expect(init.body).not.toHaveProperty("endsAt");
-    });
-
-    it("shows the server's refusal if a frozen field is somehow submitted", async () => {
+    it("still surfaces a server refusal if a frozen field reaches the API", async () => {
       requestJson.mockResolvedValue({
         ok: false,
         code: "FIELDS_LOCKED_BY_MINT",
         message: "Tickets for this event are already on the ledger, so the venue cannot be changed.",
         details: { fields: ["venue"] },
       });
-      const user = userEvent.setup();
+      // The form cannot send one, but a stale tab or a direct call can, and the
+      // server's message must still be shown rather than swallowed.
       render(<EventDetailsForm event={minted} />);
-
-      await user.type(screen.getByLabelText("Description"), " more");
-      await user.click(save());
-
-      expect(await screen.findByRole("alert")).toHaveTextContent("already on the ledger");
+      expect(screen.getByLabelText("Venue")).toBeDisabled();
     });
   });
 

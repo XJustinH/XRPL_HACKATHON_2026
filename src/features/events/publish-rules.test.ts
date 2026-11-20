@@ -137,6 +137,7 @@ describe("lockedFieldsInPatch", () => {
   it("locks every NFT-relevant field once minting has started", () => {
     const locked = lockedFieldsInPatch(minted, {
       title: "Renamed",
+      description: "New blurb",
       startsAt: "2027-01-01T20:00:00.000Z",
       endsAt: "2027-01-01T23:00:00.000Z",
       venue: "Elsewhere",
@@ -146,8 +147,13 @@ describe("lockedFieldsInPatch", () => {
     expect(locked.sort()).toEqual([...NFT_RELEVANT_FIELDS].sort());
   });
 
-  it("leaves the description editable after minting", () => {
-    expect(lockedFieldsInPatch(minted, { description: "New blurb" })).toEqual([]);
+  it("locks the description, which is embedded in each token's metadata", () => {
+    // buildTicketMetadata writes the event description into the token's own
+    // description, so editing it afterwards would contradict minted tickets.
+    expect(lockedFieldsInPatch(minted, { description: "New blurb" })).toEqual([
+      "description",
+    ]);
+    expect(NFT_RELEVANT_FIELDS).toContain("description");
   });
 
   it("does not treat an unchanged value as a change", () => {
