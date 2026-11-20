@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import type { Role } from "@/contracts/events";
+import type { UserRole } from "@/contracts";
 import {
   accountNav,
   isActiveHref,
@@ -13,7 +13,7 @@ import {
 
 export type HeaderSession = {
   displayName: string;
-  role: Role;
+  role: UserRole;
   walletAddress: string | null;
 };
 

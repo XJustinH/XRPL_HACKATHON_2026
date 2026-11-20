@@ -16,6 +16,7 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx scripts/seed/run.ts",
     "db:studio": "prisma studio",
     "xrpl:check-network": "tsx src/lib/xrpl/tools/check-network.ts",
     "xrpl:dev-wallet": "tsx src/lib/xrpl/tools/create-dev-wallet.ts",

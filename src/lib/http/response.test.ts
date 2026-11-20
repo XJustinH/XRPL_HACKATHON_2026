@@ -103,3 +103,49 @@ describe("parseJsonBody", () => {
     expect(toAppError(err).status).toBe(400);
   });
 });
+
+describe("same-origin protection for mutations", () => {
+  const ok = withApiHandler(async () => jsonOk({ done: true }));
+  const post = (headers: Record<string, string>) =>
+    new Request("http://localhost:3000/api/thing", { method: "POST", headers });
+
+  it("allows same-origin browser POSTs", async () => {
+    const res = await ok(post({ origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }), {});
+    expect(res.status).toBe(200);
+  });
+
+  it("allows server-to-server POSTs without an Origin header", async () => {
+    expect((await ok(post({}), {})).status).toBe(200);
+  });
+
+  it("rejects a foreign Origin with 403", async () => {
+    const res = await ok(post({ origin: "https://evil.example" }), {});
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("rejects requests the browser marks cross-site, and the opaque 'null' origin", async () => {
+    expect((await ok(post({ "sec-fetch-site": "cross-site" }), {})).status).toBe(403);
+    expect((await ok(post({ origin: "null" }), {})).status).toBe(403);
+  });
+
+  it("accepts the configured APP_BASE_URL origin (e.g. behind a proxy)", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://tickets.example");
+    try {
+      const res = await ok(post({ origin: "https://tickets.example" }), {});
+      expect(res.status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("never blocks safe methods", async () => {
+    const res = await ok(new Request("http://localhost:3000/api/thing", { headers: { origin: "https://evil.example" } }), {});
+    expect(res.status).toBe(200);
+  });
+
+  it("can be opted out per handler", async () => {
+    const open = withApiHandler(async () => jsonOk({}), { allowCrossOrigin: true });
+    expect((await open(post({ origin: "https://evil.example" }), {})).status).toBe(200);
+  });
+});
