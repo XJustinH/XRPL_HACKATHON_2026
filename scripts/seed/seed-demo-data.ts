@@ -6,8 +6,11 @@ import { demoEvents, demoTiers, demoUsers } from "./fixtures";
  *
  * Semantics:
  *  - Create-only: records missing from the database are inserted; records that already exist
- *    (matched by their fixed ID) are left exactly as the app left them. A re-run never resets
+ *    (matched by their fixed ID) are left as the app left them. A re-run never resets
  *    inventory, publication state or edits made during a demo.
+ *  - One exception: `User.isDemo` is restored to true on the demo users. It identifies them as demo
+ *    personas rather than being app state, and a row seeded by an older checkout (before the column
+ *    existed) or flipped by hand would otherwise drop out of demo login without any error.
  *  - Additive: touches only the fixture IDs. Nothing else is read, changed or deleted.
  *  - Atomic: everything runs in one transaction, so a failed run leaves no partial demo data.
  *  - Safe to run concurrently: inserts use ON CONFLICT DO NOTHING on the primary key.
@@ -23,6 +26,8 @@ export type SeedSummary = {
   users: SeedTableSummary;
   events: SeedTableSummary;
   tiers: SeedTableSummary;
+  /** Existing demo users whose `isDemo` flag was false and has been set back to true. */
+  demoFlagsRestored: number;
 };
 
 export class SeedConflictError extends Error {
@@ -57,6 +62,11 @@ export async function seedDemoData(db: PrismaClient): Promise<SeedSummary> {
     const tiers = await tx.ticketTier.createMany({ data: [...demoTiers], skipDuplicates: true });
 
     const ids = <T extends { id: string }>(rows: readonly T[]) => rows.map((r) => r.id);
+    const restored = await tx.user.updateMany({
+      where: { id: { in: ids(demoUsers) }, isDemo: false },
+      data: { isDemo: true },
+    });
+
     assertAllPresent(
       "user",
       demoUsers,
@@ -77,6 +87,7 @@ export async function seedDemoData(db: PrismaClient): Promise<SeedSummary> {
       users: summarise(demoUsers.length, users.count),
       events: summarise(demoEvents.length, events.count),
       tiers: summarise(demoTiers.length, tiers.count),
+      demoFlagsRestored: restored.count,
     };
   });
 }

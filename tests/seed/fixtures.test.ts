@@ -1,15 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { AppId, Drops, EventStatus, UserRole } from "@/contracts";
-import {
-  DEMO_IDS,
-  DEMO_LABEL,
-  DEMO_NOTICE,
-  DEMO_USER_SETTINGS,
-  demoEvents,
-  demoTiers,
-  demoUsers,
-} from "../../scripts/seed/fixtures";
+import { DEMO_IDS, DEMO_LABEL, DEMO_NOTICE, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
 
 /** Static checks on the XRPL-008 demo fixtures (no database needed). */
 
@@ -34,7 +26,6 @@ describe("demo seed fixtures", () => {
   it("labels every user, event and tier as demo content", () => {
     for (const u of demoUsers) {
       expect(u.displayName.startsWith(`${DEMO_LABEL} `), u.displayName).toBe(true);
-      expect(u.settings).toEqual(DEMO_USER_SETTINGS);
       expect(u.isDemo, u.displayName).toBe(true);
     }
     for (const e of demoEvents) {

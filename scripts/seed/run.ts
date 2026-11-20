@@ -32,6 +32,9 @@ async function main(): Promise<void> {
     console.log(line("users", summary.users));
     console.log(line("events", summary.events));
     console.log(line("ticket tiers", summary.tiers));
+    if (summary.demoFlagsRestored > 0) {
+      console.log(`  Restored isDemo on ${summary.demoFlagsRestored} existing demo user(s).`);
+    }
     console.log(
       "Done. No wallets, ticket NFTs, offers or ledger transactions were seeded: those come from live XRPL Testnet activity.",
     );

@@ -12,7 +12,8 @@ import type { Prisma } from "@/generated/prisma/client";
  *
  * Every record has a fixed ID so the seed is idempotent and tests/demo scripts can refer to
  * records by ID. IDs share the recognisable `5eed0000-` prefix and are valid v4-format UUIDs.
- * Every record is labelled as demo content (DEMO_LABEL / DEMO_NOTICE, `settings.demo`).
+ * Every record is labelled as demo content (DEMO_LABEL / DEMO_NOTICE), and demo users have
+ * `isDemo = true`.
  */
 
 export const DEMO_LABEL = "[DEMO]";
@@ -46,55 +47,44 @@ export const DEMO_IDS = {
 /** When the demo personas "completed onboarding" and the published events "went live". */
 const SEEDED_AT = new Date("2026-11-20T09:00:00.000Z");
 
-/** Marker stored in `User.settings` so demo accounts can be detected in code, not just by name. */
-export const DEMO_USER_SETTINGS = { demo: true } as const;
+/**
+ * Shared by every demo user. `isDemo` is the flag code should use to detect demo accounts, and it
+ * lets demo login offer the account as a persona (XRPL-010, DEMO_LOGIN_ENABLED). The seed restores
+ * it on every run (see seed-demo-data.ts).
+ */
+const demoPersona = { isDemo: true, onboardedAt: SEEDED_AT } as const;
 
 export const demoUsers = [
   {
     id: DEMO_IDS.users.artistSeller,
     role: "SELLER",
     displayName: `${DEMO_LABEL} The Testnet Tones`,
-    settings: DEMO_USER_SETTINGS,
-    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
-    isDemo: true,
-    onboardedAt: SEEDED_AT,
+    ...demoPersona,
   },
   {
     id: DEMO_IDS.users.venueSeller,
     role: "SELLER",
     displayName: `${DEMO_LABEL} The Ledger Rooms`,
-    settings: DEMO_USER_SETTINGS,
-    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
-    isDemo: true,
-    onboardedAt: SEEDED_AT,
+    ...demoPersona,
   },
   {
     id: DEMO_IDS.users.organiser,
     role: "ORGANISER",
     displayName: `${DEMO_LABEL} Door Team`,
-    settings: DEMO_USER_SETTINGS,
-    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
-    isDemo: true,
-    onboardedAt: SEEDED_AT,
+    ...demoPersona,
   },
   {
     id: DEMO_IDS.users.customer,
     role: "CUSTOMER",
     displayName: `${DEMO_LABEL} Alex Fan`,
-    settings: DEMO_USER_SETTINGS,
-    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
-    isDemo: true,
-    onboardedAt: SEEDED_AT,
+    ...demoPersona,
   },
   {
     // Recipient for the private-sale / gift / resale steps of the demo.
     id: DEMO_IDS.users.secondCustomer,
     role: "CUSTOMER",
     displayName: `${DEMO_LABEL} Sam Friend`,
-    settings: DEMO_USER_SETTINGS,
-    // Lets /onboarding offer this account as a demo persona (XRPL-010, DEMO_LOGIN_ENABLED).
-    isDemo: true,
-    onboardedAt: SEEDED_AT,
+    ...demoPersona,
   },
 ] as const satisfies readonly Prisma.UserCreateManyInput[];
 

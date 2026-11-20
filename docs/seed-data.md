@@ -44,12 +44,17 @@ import { DEMO_IDS } from "../scripts/seed/fixtures"; // path relative to your fi
 - User display names and event titles start with `[DEMO]`.
 - Event descriptions start with a notice that the event is not real and its tickets have no monetary
   value. Venue names end in `(demo venue)`, and tier descriptions say "Demo tier".
-- Demo users have `settings.demo = true`, so code can detect them without matching on names.
+- Demo users have `User.isDemo = true`. Code should detect demo accounts with this flag, not by name.
+  It is also what lets demo login offer them as personas when `DEMO_LOGIN_ENABLED` is on
+  (see [src/lib/auth/README.md](../src/lib/auth/README.md)). Users seeded before the column existed
+  carry `settings.demo = true`, which the backfill migration converted. New seeds no longer write it.
 
 ## Behaviour on re-run
 
 - **Create-only.** Missing records are inserted. Records that already exist (matched by ID) are left
   as the app left them, so a re-run never resets inventory, publication state or demo edits.
+- **Except `isDemo`.** It is set back to `true` on the five demo users on every run, because a demo user
+  without it silently drops out of demo login. The seed output says when it restored any.
 - **Additive.** Only the fixture IDs are touched. Nothing else is changed or deleted.
 - **Atomic.** One transaction, so a failed run leaves no partial demo data.
 - **Safe to run concurrently.** Inserts use `ON CONFLICT DO NOTHING`.
@@ -77,4 +82,4 @@ npx prisma migrate reset && npm run db:seed
 | `scripts/seed/seed-demo-data.ts` | `seedDemoData(db)`: idempotent, transactional insert |
 | `scripts/seed/run.ts` | CLI entry point behind `npm run db:seed` |
 | `tests/seed/fixtures.test.ts` | Unit checks: IDs, labels, contract-valid roles, statuses and prices |
-| `tests/seed/seed-demo-data.int.test.ts` | DB checks: idempotency, overlapping runs, create-only, rollback on conflict |
+| `tests/seed/seed-demo-data.int.test.ts` | DB checks: idempotency, overlapping runs, create-only, demo personas and `isDemo` restore, rollback on conflict |
