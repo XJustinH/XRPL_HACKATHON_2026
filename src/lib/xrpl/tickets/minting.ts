@@ -13,6 +13,7 @@ import { explorerNftUrl, explorerTxUrl } from "../explorer";
 import type { XrplQueryService } from "../query";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
 import { reconcileEventPrimaryOffers } from "../offers/primary";
+import { reconcileEventPurchases } from "../offers/purchase";
 import { encodeNftUri, ticketTaxon, TICKET_MEMO_TYPE, TICKET_NFT_FLAGS } from "./metadata";
 import { createPendingTicket } from "./store";
 import { isPubliclyReachable } from "./urls";
@@ -311,6 +312,8 @@ export async function getEventMints(
 
   // Sale listings awaiting the seller's approval (XRPL-029) are brought up to date too.
   await reconcileEventPrimaryOffers(deps, event.id);
+  // Purchases in flight (XRPL-031), so the seller sees validated sales.
+  await reconcileEventPurchases(deps, event.id);
 
   const tiers = await deps.db.ticketTier.findMany({
     where: { eventId: event.id },

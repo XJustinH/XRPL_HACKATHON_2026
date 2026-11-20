@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { EmptyState, NotImplementedNotice } from "@/components/ui/empty-state";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { getDb } from "@/lib/db/client";
 import { getCurrentSession } from "@/lib/auth/current-session";
@@ -13,6 +13,8 @@ import {
   assessWalletReadiness,
   type WalletReadiness,
 } from "@/features/events/wallet-readiness";
+import { BuyTicket } from "@/features/purchase/buy-ticket";
+import type { PrimaryOfferListing } from "@/contracts/xrpl";
 
 export const metadata = { title: "Buy a ticket" };
 
@@ -204,20 +206,19 @@ export default async function PurchasePage({
         ) : null}
       </section>
 
-      <WalletReadinessPanel readiness={readiness} />
-
-      <div className="mt-6 max-w-xl">
-        <NotImplementedNotice
-          title="Wallet approval"
-          blockedBy="XRPL-031, which accepts the offer with your wallet once you approve it"
-        />
-      </div>
+      <WalletReadinessPanel readiness={readiness} offer={selected.offer} />
     </>
   );
 }
 
 /** Wallet state, with the next action the buyer can take. */
-function WalletReadinessPanel({ readiness }: { readiness: WalletReadiness }) {
+function WalletReadinessPanel({
+  readiness,
+  offer,
+}: {
+  readiness: WalletReadiness;
+  offer: PrimaryOfferListing;
+}) {
   const tone =
     readiness.status === "READY"
       ? "bg-positive-soft text-positive"
@@ -274,15 +275,14 @@ function WalletReadinessPanel({ readiness }: { readiness: WalletReadiness }) {
           >
             Connect your wallet
           </Link>
+        ) : readiness.canPurchase ? (
+          // Approval and acceptance with the buyer's wallet (XRPL-031, Agent B).
+          <BuyTicket offer={offer} buyerAddress={readiness.address} />
         ) : (
           <button
             type="button"
             disabled
-            title={
-              readiness.canPurchase
-                ? "Wallet approval arrives with XRPL-031"
-                : readiness.message
-            }
+            title={readiness.message}
             className="cursor-not-allowed rounded-lg border border-border px-4 py-2 text-sm font-semibold opacity-50"
           >
             Approve in wallet
