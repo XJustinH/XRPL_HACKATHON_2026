@@ -40,13 +40,15 @@ status checks for `main` (Settings → Rules or Branches).
 | `DATABASE_URL_UNPOOLED` | Vercel build only | **Yes** | Direct (non-pooled) connection string, used for migrations and the seed. Set by the Neon integration. |
 | `SEED_DEMO_DATA` | Vercel build only | No | `true` makes each build insert the labelled demo data (idempotent). |
 | `TEST_DATABASE_URL` | `npm run test:db` only | No (local and CI only) | Must name a separate database ending in `_test`. Tests wipe it. |
-| `APP_BASE_URL` | App | No | Public origin of the deployment. An `https` URL turns on `Secure` session cookies. |
+| `APP_BASE_URL` | App | No | Public origin of the deployment. An `https` URL turns on `Secure` session cookies. Also the default base for ticket metadata links (next row). |
+| `TICKET_METADATA_BASE_URL` | Ticket NFT metadata links | No | Base of the metadata link that every minted ticket NFT stores **permanently**. Blank uses `APP_BASE_URL`, then `http://localhost:3000`. Must be the stable public `https` address wherever tickets are minted for real. |
 | `SESSION_SECRET` | App | **Yes** | At least 32 random characters. Required when `NODE_ENV=production`. Use a different value per environment. |
 | `DEMO_LOGIN_ENABLED` | App | No | Lets visitors use seeded demo accounts without a wallet. On by default locally, **off by default in production**. Set `true` only on a demo deployment. |
 | `NEXT_PUBLIC_XRPL_NETWORK_LABEL` | UI | No | Shipped to the browser, so it must never hold a secret. |
 | `XRPL_NETWORK` | App | No | `testnet` (default) or `devnet`. Mainnet is refused. Other `XRPL_*` variables are optional overrides with Testnet defaults (see the XRPL section of `.env.example`). |
-| `XAMAN_API_KEY`, `XAMAN_API_SECRET` | Wallet signing | **Yes** (the secret) | Needed once wallet sign-in and signing land (XRPL-011/014). |
-| `STORAGE_*`, `PUBLIC_ASSET_BASE_URL` | Ticket metadata and media | **Yes** (access keys) | Needed once metadata hosting and uploads land (XRPL-023, XRPL-070). |
+| `XAMAN_API_KEY`, `XAMAN_API_SECRET` | Wallet connect and transaction approval | **Yes** (the secret) | From the Xaman developer console. Without them, wallet features return "Wallet signing is not configured". |
+| `XRPL_TEST_TRANSACTIONS_ENABLED` | `/connect` | No | Shows a developer check that sends a no-op Testnet transaction through Xaman. On by default locally, **off by default in production**. |
+| `STORAGE_*`, `PUBLIC_ASSET_BASE_URL` | Media uploads | **Yes** (access keys) | Needed once uploads land (XRPL-070). Ticket metadata doesn't use them: the app serves it itself (XRPL-023). |
 | `STRIPE_*`, `SPOTIFY_*`, `NOTIFICATION_PROVIDER_API_KEY` | Optional integrations | **Yes** | Leave blank unless an integration is explicitly enabled. |
 
 Secrets are read on the server only. Never give a secret a `NEXT_PUBLIC_` prefix, which would ship it to
@@ -105,7 +107,17 @@ Importing the repository installs Vercel's GitHub app on it, which needs admin r
    | `XRPL_NETWORK` | `testnet` | `testnet` |
    | `DEMO_LOGIN_ENABLED` | `true` only for the judges' demo | `true` |
    | `SEED_DEMO_DATA` | `true` only for the judges' demo | `true` |
-   | `APP_BASE_URL` | The production `https` URL | Leave unset |
+   | `XAMAN_API_KEY`, `XAMAN_API_SECRET` | The Xaman app's key and secret | The same values |
+   | `XRPL_TEST_TRANSACTIONS_ENABLED` | Leave unset (off) | `true` if testers should see the developer check |
+   | `APP_BASE_URL` | The production `https` URL (required) | Leave unset |
+
+   Every minted ticket NFT stores a link to its metadata permanently, built from `TICKET_METADATA_BASE_URL`
+   or else `APP_BASE_URL`. A production build therefore fails unless that is a public `https` address.
+   Tickets minted on previews link to `localhost`: they are valid, but wallets and explorers can't show
+   their details.
+
+   Wallet features need the Xaman keys on every deployment. The integration polls Xaman for results and
+   uses no webhooks or return URLs, so preview URLs don't need registering in the Xaman developer console.
 
    Previews need `SESSION_SECRET` too: Vercel runs previews in production mode, and the app refuses to start
    without it. A missing value fails the build with a message naming the variable.
