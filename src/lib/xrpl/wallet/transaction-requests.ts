@@ -25,6 +25,7 @@ const TxHashHex = /^[0-9A-Fa-f]{64}$/;
 /** The one transaction type each purpose may request. Extended by XRPL-024/029/031/036/040-042. */
 const PURPOSE_TRANSACTION_TYPES: Record<TransactionPurpose, string> = {
   TEST: "AccountSet",
+  MINT_TICKET: "NFTokenMint",
 };
 
 const RequestMeta = z.object({

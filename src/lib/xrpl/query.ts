@@ -4,9 +4,11 @@ import type { z } from "zod";
 
 import { NFTokenId, TxHash, XrplAddress } from "@/contracts/common";
 import type {
+  AccountMintsPage,
   AccountNftsPage,
   AccountSummary,
   ConfirmedLedgerTx,
+  LedgerMint,
   LedgerNftOffer,
   LedgerNftOffers,
   LedgerProvenance,
@@ -33,6 +35,8 @@ const LSF_TRANSFERABLE = 0x00000008;
 const ACCOUNT_NFTS_MIN_LIMIT = 20; // rippled accepts 20-400
 const ACCOUNT_NFTS_MAX_LIMIT = 400;
 const OFFERS_PAGE_LIMIT = 500; // rippled accepts 50-500
+const ACCOUNT_TX_MIN_LIMIT = 10;
+const ACCOUNT_TX_MAX_LIMIT = 400;
 const MAX_OWNERSHIP_SCAN_PAGES = 100; // up to 40,000 NFTs held by one account
 const MAX_OFFER_PAGES = 20;
 
@@ -180,6 +184,23 @@ function hexField(source: unknown, key: string): string | null {
   return typeof value === "string" && /^[0-9A-Fa-f]{64}$/.test(value) ? value.toUpperCase() : null;
 }
 
+/** One entry of an API v2 `account_tx` answer (only the fields read here). */
+interface AccountTxEntry {
+  hash?: string;
+  ledger_index?: number;
+  close_time_iso?: string;
+  validated?: boolean;
+  meta?: unknown;
+  tx_json?: {
+    TransactionType?: string;
+    Account?: string;
+    Issuer?: string;
+    NFTokenTaxon?: number;
+    URI?: string;
+    Memos?: Array<{ Memo?: { MemoType?: string; MemoData?: string } }>;
+  };
+}
+
 function isNotFound(error: unknown): error is XrplServiceError {
   return error instanceof XrplServiceError && error.code === "NOT_FOUND";
 }
@@ -290,6 +311,54 @@ export class XrplQueryService {
           ? null
           : encodeCursor({ marker: result.marker, ledgerIndex: result.ledger_index ?? null }),
       provenance: provenanceOf(endpoint, result),
+    };
+  }
+
+  /**
+   * NFTs minted by (issued by) `address`, newest first, from validated ledgers only
+   * (rippled account_tx). Used to rebuild and verify ticket mappings from the ledger
+   * (XRPL-026). Covers only the history the node keeps.
+   */
+  async getAccountMints(
+    address: string,
+    options: { cursor?: string; limit?: number } = {},
+  ): Promise<AccountMintsPage> {
+    const account = parseAddress(address);
+    const state = options.cursor ? decodeCursor(options.cursor) : null;
+    const limit = Math.min(
+      Math.max(Math.trunc(options.limit ?? 200), ACCOUNT_TX_MIN_LIMIT),
+      ACCOUNT_TX_MAX_LIMIT,
+    );
+    const { response, endpoint } = await this.rippled.request({
+      command: "account_tx",
+      account,
+      ledger_index_min: -1,
+      ledger_index_max: state?.ledgerIndex ?? -1,
+      forward: false,
+      limit,
+      ...(state ? { marker: state.marker } : {}),
+    });
+    const result = response.result as unknown as {
+      transactions: AccountTxEntry[];
+      marker?: unknown;
+      ledger_index_max?: number;
+      validated?: boolean;
+    };
+    const items = result.transactions
+      .map((entry) => this.toLedgerMint(entry))
+      .filter((mint): mint is LedgerMint => mint !== null && mint.issuer === account);
+    return {
+      address: account,
+      items,
+      scanned: result.transactions.length,
+      nextCursor:
+        result.marker === undefined || result.marker === null
+          ? null
+          : encodeCursor({ marker: result.marker, ledgerIndex: result.ledger_index_max ?? null }),
+      provenance: provenanceOf(endpoint, {
+        ledger_index: result.ledger_index_max,
+        validated: result.validated,
+      }),
     };
   }
 
@@ -477,6 +546,42 @@ export class XrplQueryService {
 
   async close(): Promise<void> {
     await Promise.all([this.rippled.disconnect(), this.clio?.disconnect()]);
+  }
+
+  /** A validated NFTokenMint entry as a LedgerMint; null for anything else. */
+  private toLedgerMint(entry: AccountTxEntry): LedgerMint | null {
+    const tx = entry.tx_json;
+    if (entry.validated !== true || tx?.TransactionType !== "NFTokenMint") return null;
+    const hash = typeof entry.hash === "string" ? entry.hash.toUpperCase() : null;
+    const meta = typeof entry.meta === "object" && entry.meta !== null ? entry.meta : null;
+    const engineResult = (meta as { TransactionResult?: unknown } | null)?.TransactionResult;
+    if (
+      !hash ||
+      !TxHash.safeParse(hash).success ||
+      typeof tx.Account !== "string" ||
+      typeof engineResult !== "string" ||
+      typeof entry.ledger_index !== "number"
+    ) {
+      return null;
+    }
+    const succeeded = engineResult === "tesSUCCESS";
+    return {
+      hash,
+      ledgerIndex: entry.ledger_index,
+      closeTime: entry.close_time_iso ?? null,
+      account: tx.Account,
+      issuer: tx.Issuer ?? tx.Account,
+      engineResult,
+      succeeded,
+      nftokenId: succeeded ? hexField(meta, "nftoken_id") : null,
+      taxon: typeof tx.NFTokenTaxon === "number" ? tx.NFTokenTaxon : null,
+      uri: decodeUri(tx.URI),
+      memos: (tx.Memos ?? []).map(({ Memo }) => ({
+        type: decodeUri(Memo?.MemoType),
+        data: decodeUri(Memo?.MemoData),
+      })),
+      explorerUrl: explorerTxUrl(this.config, hash),
+    };
   }
 
   private toTxLookup(

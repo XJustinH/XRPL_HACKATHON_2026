@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, pageOf, TxHash, XrplAddress } from "./common";
-import { XrplNetwork } from "./entities";
+import { TicketDto, TicketTierDto, XrplNetwork } from "./entities";
 
 /**
  * XRPL contract types. Owner: Agent B.
@@ -114,6 +114,46 @@ export const AccountNftsPage = pageOf(NftDetails).extend({
   provenance: LedgerProvenance,
 });
 export type AccountNftsPage = z.infer<typeof AccountNftsPage>;
+
+/** A memo on a transaction, decoded from hex to text (null when absent or not text). */
+export const LedgerMemo = z.object({ type: z.string().nullable(), data: z.string().nullable() });
+export type LedgerMemo = z.infer<typeof LedgerMemo>;
+
+/**
+ * An NFTokenMint from a validated ledger, as found in an issuer's history (rippled
+ * account_tx). Failed mints are listed too: only `succeeded` mints created an NFT.
+ */
+export const LedgerMint = z.object({
+  hash: TxHash,
+  ledgerIndex: z.number().int(),
+  closeTime: IsoDateTime.nullable(),
+  /** Account that signed the mint. */
+  account: XrplAddress,
+  /** Issuer of the NFT: the signer, unless it minted for another account (`Issuer`). */
+  issuer: XrplAddress,
+  engineResult: z.string(),
+  succeeded: z.boolean(),
+  /** The minted NFT (from the transaction metadata); null for failed mints. */
+  nftokenId: NFTokenId.nullable(),
+  taxon: z.number().int().nullable(),
+  /** The mint's URI decoded from hex, or null. */
+  uri: z.string().nullable(),
+  memos: z.array(LedgerMemo),
+  explorerUrl: z.string(),
+});
+export type LedgerMint = z.infer<typeof LedgerMint>;
+
+/**
+ * One page of NFTs minted by (issued by) an account, newest first. Later pages are pinned
+ * to the first page's validated ledger range. `scanned` counts every transaction read on
+ * this page, mint or not.
+ */
+export const AccountMintsPage = pageOf(LedgerMint).extend({
+  address: XrplAddress,
+  scanned: z.number().int().nonnegative(),
+  provenance: LedgerProvenance,
+});
+export type AccountMintsPage = z.infer<typeof AccountMintsPage>;
 
 /** Answer to "does this address hold this NFT right now?" (rippled account_nfts). */
 export const NftOwnershipCheck = z.object({
@@ -276,7 +316,7 @@ export type SignRequest = z.infer<typeof SignRequest>;
  * transaction type, built on the server by the issue that owns it (e.g. mint: XRPL-024).
  * TEST is a no-op AccountSet for checking the approval flow during development.
  */
-export const TransactionPurpose = z.enum(["TEST"]);
+export const TransactionPurpose = z.enum(["TEST", "MINT_TICKET"]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
 /**
@@ -399,3 +439,89 @@ export const TicketNftMetadata = z.object({
   tier: z.object({ name: z.string(), priceDrops: Drops }),
 });
 export type TicketNftMetadata = z.infer<typeof TicketNftMetadata>;
+
+// ---------------------------------------------------------------------------
+// Ticket minting (XRPL-024)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of `POST /api/events/:id/mints`: mint the next ticket of a tier. The issuer is the
+ * session's proven wallet (XRPL-012), so the browser never names it.
+ */
+export const CreateMintBody = z.object({ tierId: AppId });
+export type CreateMintBody = z.infer<typeof CreateMintBody>;
+
+/** A ticket record plus explorer links once its NFT exists. */
+export const MintTicketView = TicketDto.extend({
+  nftExplorerUrl: z.string().nullable(),
+  mintTxExplorerUrl: z.string().nullable(),
+});
+export type MintTicketView = z.infer<typeof MintTicketView>;
+
+/** Response of `POST /api/events/:id/mints`. Render `request` with the approval UI. */
+export const MintRequestResult = z.object({
+  ticket: MintTicketView,
+  request: TransactionRequest,
+  /** False when the metadata URI is not reachable from the internet (e.g. localhost). */
+  metadataPublic: z.boolean(),
+});
+export type MintRequestResult = z.infer<typeof MintRequestResult>;
+
+/** Response of `GET /api/events/:id/mints`: every tier with its ticket records. */
+export const EventMints = z.object({
+  eventId: AppId,
+  title: z.string(),
+  tiers: z.array(TicketTierDto.extend({ tickets: z.array(MintTicketView) })),
+});
+export type EventMints = z.infer<typeof EventMints>;
+
+// ---------------------------------------------------------------------------
+// NFT-to-ticket mapping reconciliation (XRPL-026)
+// ---------------------------------------------------------------------------
+
+/** Why a ticket's mapping and the ledger disagree. The app never overwrites a mapping to fix one. */
+export const MintMappingProblem = z.enum([
+  /** A validated mint for this event names a ticket the app has no record of. */
+  "TICKET_NOT_FOUND",
+  /** A ticket's validated mint does not carry the ticket's metadata URI. */
+  "URI_MISMATCH",
+  /** A ticket's validated mint does not use the event's taxon. */
+  "TAXON_MISMATCH",
+  /** The ledger shows a mint for a ticket that is already mapped to a different NFT. */
+  "TICKET_HAS_OTHER_NFT",
+  /** The NFT is already mapped to another ticket; the database rejects duplicates. */
+  "NFT_MAPPED_TO_OTHER_TICKET",
+  /** A minted ticket's recorded mint transaction shows a different NFT or issuer. */
+  "MINT_TX_MISMATCH",
+  /** A minted ticket's recorded mint transaction could not be confirmed as a validated success. */
+  "MINT_TX_NOT_VALIDATED",
+]);
+export type MintMappingProblem = z.infer<typeof MintMappingProblem>;
+
+export const MintMappingIssue = z.object({
+  problem: MintMappingProblem,
+  ticketId: AppId.nullable(),
+  serial: z.number().int().nullable(),
+  nftokenId: NFTokenId.nullable(),
+  txHash: TxHash.nullable(),
+  detail: z.string(),
+});
+export type MintMappingIssue = z.infer<typeof MintMappingIssue>;
+
+/** Response of `POST /api/events/:id/mints/reconcile`. */
+export const MintMappingReport = z.object({
+  eventId: AppId,
+  /** Issuer accounts whose validated mint history was read. */
+  issuers: z.array(XrplAddress),
+  /** Validated ticket mints for this event found in that history. */
+  mintsFound: z.number().int().nonnegative(),
+  /** Tickets whose NFT mapping this run rebuilt from the ledger. */
+  recorded: z.array(AppId),
+  /** Minted tickets whose mapping matches their validated mint transaction. */
+  verified: z.number().int().nonnegative(),
+  issues: z.array(MintMappingIssue),
+  /** False when an issuer's history was longer than one run reads. */
+  complete: z.boolean(),
+  checkedAt: IsoDateTime,
+});
+export type MintMappingReport = z.infer<typeof MintMappingReport>;
