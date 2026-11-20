@@ -64,11 +64,10 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
      * harmless but would rely on the server's equality check rather than this
      * form simply not touching it.
      */
-    const candidate: Record<string, unknown> = {
-      description: String(formData.get("description") ?? ""),
-    };
+    const candidate: Record<string, unknown> = {};
     if (!minted) {
       candidate.title = String(formData.get("title") ?? "");
+      candidate.description = String(formData.get("description") ?? "");
       candidate.startsAt = startsAt ?? "";
       candidate.endsAt = endsAt;
       candidate.venue = String(formData.get("venue") ?? "");
@@ -144,9 +143,10 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
 
       {minted ? (
         <p className="mt-3 rounded-lg bg-caution-soft px-4 py-3 text-sm text-caution">
-          Tickets for this event are already on the ledger. Their metadata cannot be
-          rewritten, so the name, times, venue, city and artwork are fixed. The
-          description is shown on the event page only and stays editable.
+          Tickets for this event are already on the ledger. Each one carries the event
+          name, description, times, venue, city and artwork in its own metadata, which
+          cannot be rewritten — so these details are now fixed. To change them you would
+          need a new event.
         </p>
       ) : null}
 
@@ -189,6 +189,7 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
             name="description"
             rows={4}
             defaultValue={event.description}
+            disabled={isLocked("description")}
             maxLength={4_000}
             className={inputClass}
             {...errorProps("description")}
@@ -283,15 +284,19 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
         </div>
       </div>
 
-      <div className="mt-6 border-t border-border pt-5">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-60"
-        >
-          {pending ? "Saving…" : "Save changes"}
-        </button>
-      </div>
+      {/* Every editable field is frozen once minting starts, so there is
+          nothing left to submit and the button would be a dead control. */}
+      {minted ? null : (
+        <div className="mt-6 border-t border-border pt-5">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      )}
     </form>
   );
 }

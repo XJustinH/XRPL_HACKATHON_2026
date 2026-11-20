@@ -16,9 +16,15 @@ import type { EventPatch, EventView } from "@/contracts";
  *
  * This set must stay in step with the ticket metadata schema (XRPL-022). If
  * that schema adds or drops a field, change this list with it.
+ *
+ * Verified against `buildTicketMetadata` in `src/lib/xrpl/tickets/metadata.ts`:
+ * the title, start, end, venue and city appear in `event` and `attributes`;
+ * the artwork becomes the token's `image`; and the **description is embedded in
+ * the token's `description`**, which is why it is frozen here too.
  */
 export const NFT_RELEVANT_FIELDS = [
   "title",
+  "description",
   "startsAt",
   "endsAt",
   "venue",
@@ -31,6 +37,7 @@ export type NftRelevantField = (typeof NFT_RELEVANT_FIELDS)[number];
 /** Human labels for the messages shown when a field is frozen. */
 const FIELD_LABELS: Record<NftRelevantField, string> = {
   title: "event name",
+  description: "description",
   startsAt: "start time",
   endsAt: "end time",
   venue: "venue",
