@@ -82,3 +82,49 @@ jobs:
           npm run db:deploy
           npm run db:seed
           npm run db:seed
+
+  e2e:
+    name: Browser smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: xrpl
+          POSTGRES_PASSWORD: xrpl_ci_only
+          POSTGRES_DB: xrpl_ticketing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xrpl -d xrpl_ticketing"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Credentials for the job's own throwaway container, not a secret.
+      DATABASE_URL: postgresql://xrpl:xrpl_ci_only@localhost:5432/xrpl_ticketing
+      TEST_DATABASE_URL: postgresql://xrpl:xrpl_ci_only@localhost:5432/xrpl_ticketing_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Create the test database
+        run: docker exec -i "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U xrpl -d xrpl_ticketing < docker/postgres/init/01-create-test-db.sql
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke tests
+        run: npm run test:e2e
+      - name: Keep the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

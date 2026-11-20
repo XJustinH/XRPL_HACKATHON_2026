@@ -9,6 +9,7 @@ every push to `main`. A new push to the same PR cancels the outdated run.
 |---|---|
 | **Typecheck, lint, unit tests, build** | `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` |
 | **Database tests and demo seed** | Starts Postgres 17, creates the `*_test` database with the same init script as `docker-compose.yml`, runs `npm run test:db`, then `npm run db:deploy` and `npm run db:seed` twice to check that the seed is idempotent |
+| **Browser smoke tests** | Starts Postgres 17, installs Chromium, and runs `npm run test:e2e`: Playwright clicks through the demo path that needs no wallet, against a production build with the demo seed (see `tests/e2e/README.md`). On failure, it keeps the report as the `playwright-report` artifact |
 
 - **No secrets.** Tests use fakes for the ledger and the wallet provider, and the database is a throwaway
   container inside the job. The workflow token is read-only.
@@ -24,9 +25,10 @@ every push to `main`. A new push to the same PR cancels the outdated run.
 npm run typecheck && npm run lint && npm test && npm run build
 npm run test:db
 npm run db:deploy && npm run db:seed
+npm run test:e2e        # once: npx playwright install chromium
 ```
 
-**Making CI block merges** is a repository setting only an admin can change: add both checks as required
+**Making CI block merges** is a repository setting only an admin can change: add the checks as required
 status checks for `main` (Settings → Rules or Branches).
 
 ## Environment variables

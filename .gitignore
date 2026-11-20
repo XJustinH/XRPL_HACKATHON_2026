@@ -24,3 +24,7 @@ next-env.d.ts
 
 # Vercel CLI project link (created by `vercel link`; may cache env values)
 .vercel
+
+# Playwright output (screenshots, traces, HTML report)
+/test-results/
+/playwright-report/
