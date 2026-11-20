@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for the ticketing UI.
+ *
+ * Both colour schemes are defined so the shell is legible whichever one the
+ * device reports. Values are plain CSS variables mapped into Tailwind's theme
+ * so utilities such as `bg-surface` and `text-muted` resolve correctly.
+ */
+@theme {
+  --color-canvas: #ffffff;
+  --color-surface: #f6f7f9;
+  --color-surface-raised: #ffffff;
+  --color-border: #e2e5ea;
+  --color-ink: #111318;
+  --color-muted: #5b6270;
+  --color-accent: #1d4ed8;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: #eaf0ff;
+  --color-positive: #116a3f;
+  --color-positive-soft: #e6f5ec;
+  --color-caution: #8a5200;
+  --color-caution-soft: #fdf1dc;
+  --color-critical: #a32018;
+  --color-critical-soft: #fdeceb;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-card: 0.875rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-canvas: #0c0e13;
+    --color-surface: #14171f;
+    --color-surface-raised: #1b1f29;
+    --color-border: #2b303c;
+    --color-ink: #f2f4f8;
+    --color-muted: #a2abbb;
+    --color-accent: #7aa2ff;
+    --color-accent-ink: #0c0e13;
+    --color-accent-soft: #1b2436;
+    --color-positive: #6ee7a8;
+    --color-positive-soft: #10281c;
+    --color-caution: #f0c177;
+    --color-caution-soft: #2b2113;
+    --color-critical: #ff9d94;
+    --color-critical-soft: #2e1614;
+  }
+}
+
+html {
+  color-scheme: light dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Prevents the shell from ever scrolling sideways on narrow screens. */
+  overflow-x: hidden;
+}
+
+/* Visible keyboard focus everywhere, including inside composed widgets. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
