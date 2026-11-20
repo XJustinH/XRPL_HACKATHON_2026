@@ -1,9 +1,10 @@
-# Ticket sale offers (Agent B, XRPL-029)
+# Ticket sale offers and purchases (Agent B, XRPL-029, XRPL-031)
 
 Tickets are sold with the XRP Ledger's native NFT offers: the holder creates a **sell offer**
 (`NFTokenCreateOffer`) and a buyer accepts it (`NFTokenAcceptOffer`, XRPL-031). The ledger swaps the
 NFT and the XRP atomically, so the app never holds a ticket, a key or anyone's money. Code:
-`src/lib/xrpl/offers/primary.ts`. Contracts: `src/contracts/xrpl.ts` (Primary sale offers).
+`src/lib/xrpl/offers/primary.ts` and `src/lib/xrpl/offers/purchase.ts`. Contracts: `src/contracts/xrpl.ts` (Primary
+sale offers, Primary purchases).
 
 ## Primary offers (XRPL-029)
 
@@ -67,3 +68,57 @@ Limitations:
   accepted or cancelled.
 - One approval per ticket, as for minting.
 - Primary offers have no expiry. Cancelling a listing is XRPL-042.
+
+## Buying a ticket (XRPL-031)
+
+On a published event's page, **Buy tickets** shows the cheapest live offer of each tier (`BuyTicket`,
+`src/features/purchase/buy-ticket.tsx`, which Agent C's checkout, XRPL-030, can render for any offer).
+
+1. **Request.** `POST /api/offers/:id/accept-intent` with `{}` and an `Idempotency-Key` header.
+   - The buyer is the session's proven wallet (`requireProvenWallet`: 403 `WALLET_NOT_VERIFIED`).
+     Without one, the page asks the buyer to connect instead of failing a sale.
+   - The offer must be an `ACTIVE` primary offer on an unsold ticket of a published event (404 / 409),
+     and the buyer can't be the seller.
+   - The buyer must be able to pay: spendable XRP (balance minus reserves) covers the price plus one
+     reserve increment for the NFT page the ticket may need (`getWalletReadiness`). 409 with the reason
+     otherwise.
+   - **The live offer is re-checked on the ledger**: it must still exist with this price, owner and no
+     `Destination`, and the seller must still hold the NFT. If not, the offer becomes `STALE` and the
+     buyer gets 409 ("just sold or taken off sale").
+   - **One purchase in flight per ticket.** A hold (a `PENDING` `NFTokenAcceptOffer` `LedgerTransaction`)
+     is taken under a lock on the offer row, and a second buyer gets 409 until it settles. Earlier
+     attempts are settled first, so a declined or expired one doesn't block anyone. Agent A's inventory
+     counts the hold as a purchase in flight (`pending`).
+   - The server builds `NFTokenAcceptOffer` (`Account` = the buyer, `NFTokenSellOffer` = the offer index,
+     and a memo `xrpl-ticketing/purchase` with the offer ID) and sends it to Xaman as an
+     `ACCEPT_PRIMARY_OFFER` request, which may only be an `NFTokenAcceptOffer`.
+2. **Approve.** The buyer checks the price in Xaman and approves. The ledger swaps the NFT and the XRP.
+3. **Record.** `GET /api/offers/:id` settles purchases in flight. The buy button reads it when the
+   approval ends, and the seller's panel settles the event's purchases when it loads.
+
+| Purchase outcome | Offer | Ticket | `LedgerTransaction` |
+|---|---|---|---|
+| Validated `tesSUCCESS` `NFTokenAcceptOffer` by the buyer for this NFT (re-checked with `getValidatedTx`) | `ACCEPTED`, with `acceptTxHash` and `acceptedByAddress` from the ledger | `primarySoldAt` = ledger close time; cached owner = the buyer (checked with `verifyOwner`) | `VALIDATED_SUCCESS` |
+| Signed and submitted, not yet validated | unchanged (`purchasePending`) | unchanged | hash recorded |
+| Declined, expired, cancelled or failed, **and the offer is still live on the ledger** | stays `ACTIVE`: the ticket is still for sale | unchanged | `DROPPED` / `VALIDATED_FAILURE` |
+| Failed, and the offer is gone from the ledger (bought or withdrawn elsewhere) | `STALE` | unchanged | `VALIDATED_FAILURE` |
+
+Effects apply once (`appliedAt`). Agent A's inventory (XRPL-020) counts the ticket as sold from
+`primarySoldAt`. Reconciling sales made outside the app is XRPL-032.
+
+Verified on XRPL Testnet (20 Nov 2026): a dev buyer wallet bought the ticket listed above through the server
+path, signing exactly the transaction the server built:
+[`7145B785…067B633D`](https://testnet.xrpl.org/transactions/7145B78538A2B9E861EC79B4DF7C3AEC12504D3565DAB3848A49A882067B633D)
+(`tesSUCCESS`, ledger 22483122).
+
+- **Recorded:** the offer became `ACCEPTED` and the ticket sold at the ledger close time, with the buyer as its cached owner.
+- **On the ledger:** the buyer holds the NFT, the seller no longer does, and the sell offer is gone. The buyer paid 1 XRP plus a 12-drop fee.
+- **Inventory:** Agent A's inventory showed the ticket as pending while the purchase was held, then sold, with 9 remaining.
+
+Limitations:
+
+- One ticket per purchase. Choosing a quantity is part of Agent C's ticket selection (XRPL-019).
+- A hold lasts until the buyer's Xaman request settles (it expires after 10 minutes unopened), so an
+  abandoned purchase blocks that one ticket for up to 10 minutes.
+- A sale made straight from the ledger with another wallet app is not recorded until XRPL-032's
+  reconciliation. The offer is marked `STALE` the next time anyone tries to buy it in the app.

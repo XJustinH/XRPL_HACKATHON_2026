@@ -7,6 +7,9 @@ import { getDb } from "@/lib/db/client";
 import { safeExternalUrl } from "@/contracts";
 import { getPublishedEvent } from "@/features/events/event-store";
 import { cityBrowseHref, venueBrowseHref } from "@/features/discovery/browse-links";
+import { BuyTicket } from "@/features/purchase/buy-ticket";
+import { getCurrentSession } from "@/lib/auth/current-session";
+import { listPrimaryOffers } from "@/lib/xrpl/offers/primary";
 import {
   formatEventDate,
   formatXrp,
@@ -38,6 +41,15 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   if (!event) notFound();
 
   const fromPrice = lowestPriceDrops(event.tiers);
+
+  // Buying from primary offers (XRPL-031, Agent B): the cheapest live offer of each tier.
+  const [offers, session] = await Promise.all([listPrimaryOffers(getDb(), event.id), getCurrentSession()]);
+  const forSale = new Map<string, { offer: (typeof offers)[number]; count: number }>();
+  for (const offer of offers) {
+    const tier = forSale.get(offer.tierId);
+    if (tier) tier.count += 1;
+    else forSale.set(offer.tierId, { offer, count: 1 }); // offers come cheapest first
+  }
   const artworkUrl = safeExternalUrl(event.artworkUrl);
 
   return (
@@ -131,6 +143,34 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </ul>
         )}
       </section>
+
+      {forSale.size > 0 ? (
+        <section aria-labelledby="buy-heading" className="mt-6">
+          <h2 id="buy-heading" className="text-lg font-semibold">
+            Buy tickets
+          </h2>
+          <p className="mt-1 text-sm text-muted">
+            Each ticket is an NFT on XRPL Testnet. You buy it from the organiser with your own Xaman wallet: the
+            XRP and the ticket change hands in one ledger transaction.
+          </p>
+          <ul className="mt-3 flex flex-col gap-3">
+            {[...forSale.values()].map(({ offer, count }) => (
+              <li
+                key={offer.tierId}
+                className="flex flex-col gap-3 rounded-card border border-border bg-surface-raised p-4"
+              >
+                <div>
+                  <h3 className="font-semibold">{offer.tierName}</h3>
+                  <p className="text-sm text-muted">
+                    {count} for sale · {formatXrp(offer.amountDrops)}
+                  </p>
+                </div>
+                <BuyTicket offer={offer} buyerAddress={session?.walletAddress ?? null} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="mt-6">
         <NotImplementedNotice

@@ -27,6 +27,7 @@ const PURPOSE_TRANSACTION_TYPES: Record<TransactionPurpose, string> = {
   TEST: "AccountSet",
   MINT_TICKET: "NFTokenMint",
   CREATE_PRIMARY_OFFER: "NFTokenCreateOffer",
+  ACCEPT_PRIMARY_OFFER: "NFTokenAcceptOffer",
 };
 
 const RequestMeta = z.object({

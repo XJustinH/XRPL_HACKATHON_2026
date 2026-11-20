@@ -316,7 +316,12 @@ export type SignRequest = z.infer<typeof SignRequest>;
  * transaction type, built on the server by the issue that owns it (e.g. mint: XRPL-024).
  * TEST is a no-op AccountSet for checking the approval flow during development.
  */
-export const TransactionPurpose = z.enum(["TEST", "MINT_TICKET", "CREATE_PRIMARY_OFFER"]);
+export const TransactionPurpose = z.enum([
+  "TEST",
+  "MINT_TICKET",
+  "CREATE_PRIMARY_OFFER",
+  "ACCEPT_PRIMARY_OFFER",
+]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
 /**
@@ -576,3 +581,40 @@ export const EventPrimaryOffers = z.object({
   offers: z.array(PrimaryOfferListing),
 });
 export type EventPrimaryOffers = z.infer<typeof EventPrimaryOffers>;
+
+// ---------------------------------------------------------------------------
+// Primary purchases (XRPL-031)
+// ---------------------------------------------------------------------------
+
+/** Body of `POST /api/offers/:id/accept-intent`. The buyer is the session's proven wallet. */
+export const AcceptOfferBody = z.object({}).strict();
+export type AcceptOfferBody = z.infer<typeof AcceptOfferBody>;
+
+/** Response of `POST /api/offers/:id/accept-intent`. Render `request` with the approval UI. */
+export const PurchaseRequestResult = z.object({
+  offerId: AppId,
+  ticketId: AppId,
+  serial: z.number().int().positive(),
+  tierName: z.string(),
+  eventTitle: z.string(),
+  amountDrops: Drops,
+  request: TransactionRequest,
+});
+export type PurchaseRequestResult = z.infer<typeof PurchaseRequestResult>;
+
+/**
+ * Response of `GET /api/offers/:id`: the offer after reconciling purchases in flight. A sale is
+ * recorded only from a validated `NFTokenAcceptOffer`.
+ */
+export const OfferStatus = z.object({
+  offer: NFTOfferDto,
+  ticketId: AppId.nullable(),
+  serial: z.number().int().positive().nullable(),
+  /** When the ticket's primary sale validated, or null. */
+  soldAt: IsoDateTime.nullable(),
+  /** A purchase is waiting for its buyer's approval or for the ledger. */
+  purchasePending: z.boolean(),
+  acceptTxExplorerUrl: z.string().nullable(),
+  nftExplorerUrl: z.string(),
+});
+export type OfferStatus = z.infer<typeof OfferStatus>;
