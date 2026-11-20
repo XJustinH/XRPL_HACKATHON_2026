@@ -70,6 +70,10 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | A `MINTED` ticket has ledger identity | CHECK `nftokenId`, `mintTxHash`, `mintedAt` present |
 | Gifts are zero-price and recipient-bound; private offers name a recipient | CHECK on `NFTOffer` |
 | Retried mutations don't double-apply | `IdempotencyRecord @@unique([scope, route, key])` |
+| One review per author per event, and per check-in (XRPL-079) | `Review @@unique([eventId, authorId])`, `Review.checkInRecordId` unique |
+| A review's check-in is an admission to the same event | trigger `Review_checkin_same_event` |
+| Review rating 1–5, body ≤ 2000 characters | CHECK `Review_rating_range`, `Review_body_length` |
+| "No category" is NULL, never an empty string (XRPL-015/059) | CHECK `Event_category_format` |
 
 Every timestamp is `timestamptz` (UTC). Every app ID is a UUID. Ledger identifiers (`NFTokenID`, offer index,
 tx hash) are separate 64-hex strings, canonicalised to upper case by the contracts.

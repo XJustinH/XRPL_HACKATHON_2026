@@ -165,3 +165,18 @@ export const CheckInRecordDto = z.object({
   verifiedLedgerIndex: z.number().int().nullable(),
 });
 export type CheckInRecordDto = z.infer<typeof CheckInRecordDto>;
+
+/** A stored event review (XRPL-079). Public review endpoints should omit hidden ones. */
+export const ReviewDto = z.object({
+  id: AppId,
+  eventId: AppId,
+  authorId: AppId,
+  rating: z.number().int().min(1).max(5),
+  body: z.string().max(2000),
+  /** The check-in that proves the author attended; null only if the API ever allows unverified reviews. */
+  checkInRecordId: AppId.nullable(),
+  hiddenAt: IsoDateTime.nullable(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ReviewDto = z.infer<typeof ReviewDto>;

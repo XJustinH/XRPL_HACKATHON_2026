@@ -218,3 +218,87 @@ describe("event category (XRPL-015 / XRPL-059)", () => {
     expect(found.map((e) => e.title)).toEqual(["A"]);
   });
 });
+
+describe("reviews (XRPL-079)", () => {
+  /** An event with one admitted ticket, plus the attendee who will review it. */
+  async function admitted(nftokenId = NFT_A, serial = 1) {
+    const { seller, event, tier } = await seedEvent();
+    const ticket = await mintedTicket(event.id, tier.id, serial, nftokenId);
+    const checkIn = await db.checkInRecord.create({
+      data: { ticketId: ticket.id, eventId: event.id, organiserId: seller.id, walletAddress: ADDR },
+    });
+    const author = await db.user.create({ data: { displayName: "Fan" } });
+    return { event, checkIn, author };
+  }
+
+  it("stores a review linked to the author's check-in; the body may be empty", async () => {
+    const { event, checkIn, author } = await admitted();
+    const review = await db.review.create({
+      data: { eventId: event.id, authorId: author.id, rating: 5, checkInRecordId: checkIn.id },
+    });
+    expect(review).toMatchObject({ rating: 5, body: "", hiddenAt: null, checkInRecordId: checkIn.id });
+  });
+
+  it.each([0, 6, -1])("rejects rating %i", async (rating) => {
+    const { event, author } = await admitted();
+    await expect(db.review.create({ data: { eventId: event.id, authorId: author.id, rating } })).rejects.toThrow(
+      /Review_rating_range/,
+    );
+  });
+
+  it("accepts a 2000-character body and rejects 2001", async () => {
+    const { event, author } = await admitted();
+    await expect(
+      db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 4, body: "x".repeat(2000) } }),
+    ).resolves.toBeTruthy();
+    const other = await db.user.create({ data: { displayName: "Other" } });
+    await expect(
+      db.review.create({ data: { eventId: event.id, authorId: other.id, rating: 4, body: "x".repeat(2001) } }),
+    ).rejects.toThrow(/Review_body_length/);
+  });
+
+  it("allows one review per author per event", async () => {
+    const { event, author } = await admitted();
+    await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 3 } });
+    await expect(db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 4 } })).rejects.toMatchObject({
+      code: "P2002",
+    });
+  });
+
+  it("lets one check-in vouch for only one review", async () => {
+    const { event, checkIn, author } = await admitted();
+    await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 5, checkInRecordId: checkIn.id } });
+    const friend = await db.user.create({ data: { displayName: "Friend" } });
+    await expect(
+      db.review.create({ data: { eventId: event.id, authorId: friend.id, rating: 5, checkInRecordId: checkIn.id } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("refuses a check-in from a different event, on create and on update", async () => {
+    const elsewhere = await admitted(NFT_A, 1);
+    const { event, author } = await admitted(NFT_B, 2);
+    await expect(
+      db.review.create({
+        data: { eventId: event.id, authorId: author.id, rating: 5, checkInRecordId: elsewhere.checkIn.id },
+      }),
+    ).rejects.toThrow(/Review_checkin_same_event/);
+
+    const review = await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 5 } });
+    await expect(
+      db.review.update({ where: { id: review.id }, data: { checkInRecordId: elsewhere.checkIn.id } }),
+    ).rejects.toThrow(/Review_checkin_same_event/);
+  });
+
+  it("keeps the proof: a check-in backing a review can't be deleted", async () => {
+    const { event, checkIn, author } = await admitted();
+    await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 5, checkInRecordId: checkIn.id } });
+    await expect(db.checkInRecord.delete({ where: { id: checkIn.id } })).rejects.toBeTruthy();
+  });
+
+  it("removes a user's reviews with the user", async () => {
+    const { event, author } = await admitted();
+    await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 2 } });
+    await db.user.delete({ where: { id: author.id } });
+    expect(await db.review.count()).toBe(0);
+  });
+});
