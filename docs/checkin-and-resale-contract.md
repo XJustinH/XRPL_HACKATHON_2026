@@ -104,6 +104,23 @@ Failures use the standard envelope `{ error: { code: <status>, message }, reques
 - Every eligibility `message` that mentions resale includes `RESALE_LIMITATION_NOTICE`. The UI must
   show it: the rule is app-only and does not stop transfers made directly on XRPL.
 
+### Live routes
+
+| Route | Returns |
+|---|---|
+| `GET /api/events/:id/resale-eligibility` | `ResaleEligibility` + `priceCapNotice` |
+| `GET /api/events/:id/resale-offers` | `{ eligibility, offers: ResaleListing[], limitationNotice, priceCapNotice }`, cheapest first |
+
+- Both are public for published events. Drafts are visible only to their owner (404 otherwise), the
+  same rule as `/availability`. Both are never cached.
+- Wiring (`src/lib/resale-policy/server.ts`):
+  - sell-out comes from Agent A's `createInventoryPort()` (XRPL-020);
+  - events come from the Event table;
+  - offers come from the `NFTOffer` mirror: `RESALE`, `ACTIVE`, no `Destination`, with a validated create transaction.
+- Agent B's accept route must still re-check the live offer on XRPL before a purchase, and can replace
+  the offer source with its own `OfferPort`.
+- Price cap: set `RESALE_MAX_MARKUP_PERCENT` (whole number 0–1000) to turn it on. Unset means off.
+
 ## What D still needs
 
 | From | What | Used by |
