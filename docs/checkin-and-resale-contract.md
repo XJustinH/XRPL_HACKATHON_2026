@@ -55,7 +55,9 @@ details. A tampered or forged QR, or one from another server, returns `INVALID_Q
 approves it in Xaman. The proof token is `<xamanRequestId>.<hmac(challengeId, xamanRequestId)>`, so
 only a sign-in this server created **for this challenge** counts. An old `/connect` sign-in, or one
 made for another code, is rejected. The server asks Xaman (authenticated with our API key) whether that
-request was SIGNED on Testnet and by which account, and that account must be the challenge's wallet.
+request was SIGNED on Testnet and by which account, then **verifies the signed blob itself** with Agent A's
+`verifyXamanSignInBlob` (memo names this request, valid signature, master key of that account). That
+account must be the challenge's wallet.
 At the gate the ledger owner is read again, so a ticket transferred away after approval gets `WRONG_OWNER`.
 
 **Wallet on the request:** the session's verified wallet is used when there is one (XRPL-012).
