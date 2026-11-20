@@ -3,7 +3,7 @@
  *  - CheckInStore, TicketDirectory: Prisma implementations in ./prisma-store.ts (schema XRPL-005)
  *  - OrganiserAccess: Agent A roles (XRPL-013)
  *  - LedgerOwnership: Agent B `verifyOwner` from a validated ledger (XRPL-007/028), see ./xrpl-ownership.ts
- *  - WalletProofVerifier: Agent A/B wallet-control proof (XRPL-012, e.g. Xaman SignIn)
+ *  - WalletProofVerifier: Xaman SignIn via Agent B's sign requests, see ./xaman-proof.ts
  * In-memory fakes for tests live in ./testing/fakes.ts.
  */
 import type { NFTokenId, XrplAddress } from "@/contracts/common";
@@ -43,8 +43,12 @@ export interface LedgerOwnership {
 }
 
 export interface WalletProofVerifier {
-  /** Address that signed exactly `message` with `proof`, or null if the proof is invalid. */
-  verify(message: string, proof: string): Promise<XrplAddress | null>;
+  /**
+   * Address whose wallet approved this check-in challenge with `proof`, or null if the proof
+   * is invalid, unsigned or bound to a different challenge. `message` is the challenge's
+   * canonical text (for signature-over-message providers). Throws if the provider is down.
+   */
+  verify(input: { challengeId: string; message: string; proof: string }): Promise<XrplAddress | null>;
 }
 
 /** Mirrors the `CheckInChallenge` table. `proofReference` set means wallet control was proven. */

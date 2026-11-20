@@ -8,21 +8,22 @@ About 60 seconds. Shows that a ticket gets in once, and that a copy of the code 
   - **Organiser:** signed in as the event's seller, on `/organiser/events/<eventId>/checkin`
   - **Attendee:** signed in with a verified wallet that holds a ticket for that event
 - XRPL Testnet reachable (`npm run xrpl:check-network` → OK).
-- **Wallet approval (XRPL-012) must be live.** Until it is, the attendee's approve step returns 503, so use the recorded fallback below.
+- `XAMAN_API_KEY` / `XAMAN_API_SECRET` set on the server, and Xaman on the attendee's phone set to **Testnet**.
+- A **minted** ticket (needs Agent B's minting, XRPL-024). Without one, use the fallback below.
 
 ## Script
 
-1. **Attendee** opens the ticket and taps "Show check-in code". A QR appears that expires in 2 minutes.
-   > "The code is only valid for two minutes and only for this event. It contains no wallet address or personal data."
-2. **Attendee** approves the check-in in their wallet.
-   > "A screenshot isn't enough: the wallet that holds the ticket NFT has to sign for this exact code."
+1. **Attendee** opens `/checkin/<ticketId>` and taps **Show check-in code**, then **Open in Xaman** and approves.
+   > "A screenshot isn't enough: the wallet that holds the ticket NFT has to approve this exact code. It moves no funds."
+2. The gate QR appears with a 5-minute countdown.
+   > "The code works once, only for this event, and contains no wallet address or personal data."
 3. **Organiser** scans. It shows green **Valid ticket**, read live from the XRP Ledger. Tap **Admit**, and it shows **Admitted**.
 4. **Organiser** scans the **same code again** (or a screenshot of it). It shows red **Already checked in: do not admit**.
    > "The database admits a ticket once per event, even if two staff scan at the same moment."
 5. Point at **Entry so far**: the count went up by one, not two.
 
 Optional extras if there is time:
-- Wait 2 minutes and scan a fresh, unapproved code. It shows **Code expired**.
+- Let a code run past its countdown, then scan it. It shows **Code expired**.
 - Transfer the NFT to another wallet in Xaman, then scan. It shows **Ticket not held by this wallet**.
 
 ## Fallback (no live wallet approval)

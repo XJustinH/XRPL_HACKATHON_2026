@@ -5,14 +5,20 @@
  * this slice adds the check-in types and the shared limitation notice.
  */
 import { z } from "zod";
-import { AppId, type IsoDateTime, type NFTokenId, type XrplAddress } from "./common";
+import { AppId, type IsoDateTime, type NFTokenId, XrplAddress } from "./common";
+import type { SignRequest } from "./xrpl";
 
 // ---------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------
 
-/** POST /api/checkin/challenges. Wallet comes from the verified session, never the body. */
-export const CheckInChallengeRequest = z.object({ ticketId: AppId });
+/**
+ * POST /api/checkin/challenges. The wallet is the session's verified wallet when there is one.
+ * Otherwise the attendee names it (e.g. from the wallet connected in this browser). That claim
+ * is only trusted after XRPL confirms the wallet holds the ticket AND the wallet approves the
+ * check-in in Xaman, so a false claim cannot get anyone in.
+ */
+export const CheckInChallengeRequest = z.object({ ticketId: AppId, walletAddress: XrplAddress.optional() });
 export type CheckInChallengeRequest = z.infer<typeof CheckInChallengeRequest>;
 
 /** POST /api/checkin/challenges/:id/prove */
@@ -57,6 +63,14 @@ export type CheckInFailureStatus = (typeof CHECKIN_FAILURE_STATUSES)[number];
 export type CheckInFailure = { status: CheckInFailureStatus; message: string };
 
 export type CheckInProven = { status: "PROVEN"; challengeId: string };
+
+/** POST /api/checkin/challenges/:id/sign-request: open the Xaman approval for this code. */
+export type CheckInApprovalStarted = {
+  /** Show `qrPngUrl` / open `signUrl`; poll `GET /api/wallet/sign-requests/:id` until final. */
+  signRequest: SignRequest;
+  /** Submit to `.../prove` once the sign request is SIGNED. Bound to this challenge only. */
+  proof: string;
+};
 
 export type CheckInVerification =
   | {
