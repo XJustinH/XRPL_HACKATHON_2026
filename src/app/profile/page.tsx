@@ -1,22 +1,29 @@
 import Link from "next/link";
 import { EVENT_CATEGORY_LABELS } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
-import { EmptyState, NotImplementedNotice } from "@/components/ui/empty-state";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
 import { ROLE_LABEL } from "@/features/onboarding/roles";
 import { SignOutButton } from "@/features/onboarding/sign-out-button";
 import { getCustomerPreferences } from "@/features/profiles/customer-preferences";
+import { getOwnCustomerProfile } from "@/features/profiles/customer-profile";
+import { Avatar, CustomerProfileForm } from "@/features/profiles/customer-profile-form";
+import { ActivitySummary, summariseUpcoming } from "@/features/profiles/activity-summary";
+import { listAttendedEvents } from "@/features/checkin/attendance-history";
+import { listTicketsForOwner } from "@/lib/xrpl/tickets/ownership";
+import { mintingDeps } from "@/lib/xrpl/tickets/server";
 
 export const metadata = { title: "Profile" };
 
 /**
- * Account summary and the signed-in user's account actions.
+ * The signed-in user's profile: account summary and actions, editable display name and avatar,
+ * discovery preferences (XRPL-058) and an activity summary (XRPL-056): upcoming events from the
+ * tickets the wallet holds, events attended, followed sellers and wishlist.
  *
- * The profile itself (display name, city, interests, activity) arrives with
- * XRPL-056. This page exists now so that signing out is reachable from the
- * account area rather than only from the onboarding screen.
+ * Each read below may fail on its own without taking the page down; a failure shows as
+ * "couldn't load", never as "nothing here".
  */
 export default async function ProfilePage() {
   const session = await getCurrentSession();
@@ -49,11 +56,31 @@ export default async function ProfilePage() {
     },
   );
 
+  const db = getDb();
+  const [profile, upcoming, attended] = await Promise.all([
+    getOwnCustomerProfile(db, session.userId).catch((error: unknown) => {
+      console.error("[profiles] could not load the profile", error);
+      return { displayName: session.displayName, imageUrl: null };
+    }),
+    session.walletAddress
+      ? listTicketsForOwner(mintingDeps(), { address: session.walletAddress, viewerAddress: session.walletAddress })
+          .then((tickets) => summariseUpcoming(tickets))
+          .catch((error: unknown) => {
+            console.error("[profiles] could not read wallet tickets", error);
+            return null;
+          })
+      : Promise.resolve([]),
+    listAttendedEvents(db, session.userId).catch((error: unknown) => {
+      console.error("[profiles] could not load attended events", error);
+      return null;
+    }),
+  ]);
+
   return (
     <>
       <PageHeader
         title="Your profile"
-        description="Your display name, chosen city and interests. Profile visibility is yours to control."
+        description="Your name and picture, your discovery preferences, and the events you're going to and have been to."
       />
 
       <section
@@ -61,8 +88,9 @@ export default async function ProfilePage() {
         className="rounded-card border border-border bg-surface-raised p-5"
       >
         <div className="flex flex-wrap items-center gap-3">
+          <Avatar url={profile.imageUrl} name={profile.displayName} />
           <h2 id="account-heading" className="text-lg font-semibold">
-            {session.displayName}
+            {profile.displayName}
           </h2>
           <Badge tone="accent">{ROLE_LABEL[session.role]}</Badge>
           {session.isDemo ? <Badge tone="caution">Demo account</Badge> : null}
@@ -110,6 +138,8 @@ export default async function ProfilePage() {
           </Link>
         </div>
       </section>
+
+      <CustomerProfileForm profile={profile} />
 
       <section
         aria-labelledby="preferences-heading"
@@ -160,12 +190,7 @@ export default async function ProfilePage() {
         )}
       </section>
 
-      <div className="mt-6">
-        <NotImplementedNotice
-          title="Profile details and activity summary"
-          blockedBy="XRPL-056, which builds the editable display name and activity history on top of this account summary"
-        />
-      </div>
+      <ActivitySummary hasWallet={!!session.walletAddress} upcoming={upcoming} attended={attended} />
     </>
   );
 }

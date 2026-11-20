@@ -399,12 +399,16 @@ export const CustomerProfilePatch = z.object({
   interests: z.array(EventCategory).max(EVENT_CATEGORIES.length).optional(),
   visibility: ProfileVisibility.optional(),
   socialLinks: z.array(SocialLink).max(6).optional(),
+  /** Avatar image (XRPL-056). Stored as a URL in settings, like the seller image; "" clears it. */
+  imageUrl: OptionalHttpUrl.optional(),
 });
 export type CustomerProfilePatch = z.infer<typeof CustomerProfilePatch>;
 
 export type CustomerProfile = {
   id: AppId;
   displayName: string;
+  /** Avatar image URL (http/https only), or null. */
+  imageUrl: string | null;
   city: string | null;
   interests: EventCategory[];
   visibility: ProfileVisibility;
