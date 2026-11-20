@@ -16,4 +16,4 @@ Usage (server component): pass an offer from `listPrimaryOffers(db, eventId)` an
 ```
 
 It finishes the purchase on Agent C's purchase page (`/events/:id/purchase?tier=…`, XRPL-019), for the offer that
-page confirmed. Agent C's wallet readiness and fee estimate (XRPL-030) sit alongside it.
+page confirmed. It sits in that page's wallet panel (XRPL-030) and appears only when the wallet is ready to pay.

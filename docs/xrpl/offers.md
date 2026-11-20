@@ -72,8 +72,9 @@ Limitations:
 ## Buying a ticket (XRPL-031)
 
 The buyer picks a ticket type on the event page (Agent C's ticket selection, XRPL-019), which leads to
-`/events/:id/purchase?tier=…`. That page confirms the cheapest live offer for the tier and finishes the
-purchase with `BuyTicket` (`src/features/purchase/buy-ticket.tsx`).
+`/events/:id/purchase?tier=…`. That page confirms the cheapest live offer for the tier and shows the full
+amount and the wallet's readiness (Agent C, XRPL-030). When the wallet is ready, `BuyTicket`
+(`src/features/purchase/buy-ticket.tsx`) finishes the purchase.
 
 1. **Request.** `POST /api/offers/:id/accept-intent` with `{}` and an `Idempotency-Key` header.
    - The buyer is the session's proven wallet (`requireProvenWallet`: 403 `WALLET_NOT_VERIFIED`).
