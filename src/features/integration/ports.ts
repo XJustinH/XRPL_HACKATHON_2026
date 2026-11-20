@@ -24,32 +24,43 @@ import type {
   Drops,
   EventAvailability,
   EventDraftInput,
-  EventPatchInput,
+  EventPatch,
   EventQuery,
   EventStatus,
   EventView,
   LedgerProof,
-  NFTokenID,
-  Page,
+  NFTokenId,
+  OfferIndex,
   ResaleEligibility,
   ResaleListing,
-  Role,
   SellerProfile,
   SellerProfilePatch,
   TicketTierInput,
+  TicketTierPatch,
   TicketView,
+  UserRole,
   WalletReadiness,
-  XRPLAddress,
-} from "@/contracts/events";
+  XrplAddress,
+} from "@/contracts";
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Cursor-paged result.
+ *
+ * Mirrors the shape produced by `pageOf()` in `src/contracts/common.ts`, which
+ * ships the Zod helper but no standalone TypeScript type. Kept local rather than
+ * added to the shared barrel to avoid claiming a cross-cutting name; worth
+ * promoting to `common.ts` if another slice needs it.
+ */
+export type Page<T> = { items: T[]; nextCursor: string | null };
 
 export type Session = {
   userId: string;
   displayName: string;
-  role: Role;
+  role: UserRole;
   /** Verified XRPL address bound to this session, if wallet control was proven. */
-  walletAddress: XRPLAddress | null;
+  walletAddress: XrplAddress | null;
 };
 
 export interface SessionPort {
@@ -67,14 +78,14 @@ export interface EventStorePort {
   getEvent(eventId: string): Promise<EventView | null>;
   listSellerEvents(sellerId: string, status?: EventStatus): Promise<EventView[]>;
   createDraft(sellerId: string, input: EventDraftInput): Promise<EventView>;
-  updateEvent(eventId: string, input: EventPatchInput): Promise<EventView>;
+  updateEvent(eventId: string, input: EventPatch): Promise<EventView>;
   publishEvent(eventId: string): Promise<EventView>;
   unpublishEvent(eventId: string): Promise<EventView>;
   addTier(eventId: string, input: TicketTierInput): Promise<EventView>;
   updateTier(
     eventId: string,
     tierId: string,
-    input: Partial<TicketTierInput>,
+    input: TicketTierPatch,
   ): Promise<EventView>;
   removeTier(eventId: string, tierId: string): Promise<EventView>;
   listCities(): Promise<string[]>;
@@ -91,11 +102,11 @@ export interface InventoryPort {
 
 export interface LedgerReadPort {
   /** Current on-chain owner of a token. */
-  getOwner(nftokenId: NFTokenID): Promise<XRPLAddress | null>;
+  getOwner(nftokenId: NFTokenId): Promise<XrplAddress | null>;
   /** Tickets whose reconciled owner is this address. */
-  listTicketsForOwner(address: XRPLAddress): Promise<TicketView[]>;
+  listTicketsForOwner(address: XrplAddress): Promise<TicketView[]>;
   getTicket(ticketId: string): Promise<TicketView | null>;
-  getLedgerProof(nftokenId: NFTokenID): Promise<LedgerProof | null>;
+  getLedgerProof(nftokenId: NFTokenId): Promise<LedgerProof | null>;
   /** Current network fee estimate in drops, or null when unavailable. */
   getFeeEstimateDrops(): Promise<Drops | null>;
 }
@@ -104,7 +115,7 @@ export interface LedgerReadPort {
 
 export interface WalletPort {
   getReadiness(requiredDrops?: Drops): Promise<WalletReadiness>;
-  connect(address?: XRPLAddress): Promise<WalletReadiness>;
+  connect(address?: XrplAddress): Promise<WalletReadiness>;
   disconnect(): Promise<WalletReadiness>;
 }
 
@@ -112,9 +123,9 @@ export interface WalletPort {
 
 export type PrimaryOffer = {
   offerId: string;
-  offerIndex: string;
-  nftokenId: NFTokenID;
-  sellerAddress: XRPLAddress;
+  offerIndex: OfferIndex;
+  nftokenId: NFTokenId;
+  sellerAddress: XrplAddress;
   amountDrops: Drops;
   tierId: string;
 };

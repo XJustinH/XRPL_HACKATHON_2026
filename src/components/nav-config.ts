@@ -1,10 +1,10 @@
-import type { Role } from "@/contracts/events";
+import type { UserRole } from "@/contracts";
 
 export type NavItem = {
   href: string;
   label: string;
   /** Roles permitted to see the link. Omitted means visible to everyone. */
-  roles?: Role[];
+  roles?: UserRole[];
   /** Hidden until a session exists. */
   requiresSession?: boolean;
 };
@@ -37,7 +37,7 @@ export const accountNav: NavItem[] = [
 
 export function visibleNavItems(
   items: NavItem[],
-  session: { role: Role } | null,
+  session: { role: UserRole } | null,
 ): NavItem[] {
   return items.filter((item) => {
     if (item.requiresSession && !session) return false;
