@@ -15,6 +15,7 @@ import { formatEventDate, formatXrp, isPastEvent } from "@/features/events/event
 import { cityBrowseHref, venueBrowseHref } from "@/features/discovery/browse-links";
 import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
 import { TicketSelection } from "@/features/events/ticket-selection";
+import { EventReviews } from "@/features/reviews/event-reviews";
 
 /**
  * Public event page with ticket selection (XRPL-019).
@@ -153,6 +154,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       />
 
       <ResaleSection eventId={event.id} resale={resale} />
+
+      {/* Agent D (XRPL-079): reviews, which only people checked in at this event can write. */}
+      <div className="mt-10">
+        <EventReviews eventId={event.id} />
+      </div>
 
       <p className="mt-8 text-sm text-muted">
         Tickets are NFTs on the XRP Ledger Testnet. Prices are in XRP, and you approve
