@@ -93,6 +93,21 @@ describe("input validation", () => {
   });
 });
 
+describe("getReserves", () => {
+  it("reads the base and per-object reserve in drops from the validated ledger", async () => {
+    const { service, sent } = setup(() => ({
+      result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000, seq: 9 } } },
+    }));
+    expect(await service.getReserves()).toEqual({ baseDrops: "1000000", incrementDrops: "200000" });
+    expect(sent()[0]).toMatchObject({ command: "server_state" });
+  });
+
+  it("reports a node without a validated ledger as unavailable", async () => {
+    const { service } = setup(() => ({ result: { state: {} } }));
+    expect((await caught(service.getReserves())).code).toBe("NODE_UNAVAILABLE");
+  });
+});
+
 describe("getFeeEstimateDrops", () => {
   const fee = (open_ledger_fee: string) => () => ({
     result: { drops: { base_fee: "10", median_fee: "5000", minimum_fee: "10", open_ledger_fee } },

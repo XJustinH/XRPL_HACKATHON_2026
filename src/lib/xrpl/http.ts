@@ -17,7 +17,16 @@ export function toLedgerAppError(error: unknown): unknown {
     case "INVALID_INPUT":
       return new AppError(ErrorCode.VALIDATION_FAILED, error.message, 400);
     case "NOT_FOUND":
-      return new AppError(ErrorCode.NOT_FOUND, "Not found on the validated ledger", 404);
+      return new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
+    case "PROVIDER_UNAVAILABLE":
+      return new AppError(
+        ErrorCode.SERVICE_UNAVAILABLE,
+        "The wallet service is unavailable. Try again shortly.",
+        503,
+        {
+          retryable: true,
+        },
+      );
     case "TIMEOUT":
     case "NODE_UNAVAILABLE":
     case "RPC_ERROR":
@@ -46,4 +55,13 @@ export function toLedgerAppError(error: unknown): unknown {
 /** For `.catch()` in route handlers: rethrow XRPL failures as API errors. */
 export function rethrowAsAppError(error: unknown): never {
   throw toLedgerAppError(error);
+}
+
+/** Runs `work` and rethrows any XRPL/wallet failure (including synchronous ones) as an API error. */
+export async function withLedgerErrors<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    throw toLedgerAppError(error);
+  }
 }
