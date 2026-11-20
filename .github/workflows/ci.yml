@@ -1,0 +1,84 @@
+# Pull request checks (XRPL-009). See docs/ci-and-deployment.md.
+# No secrets are needed: tests use fakes for the ledger and the wallet provider, and the
+# database is a throwaway service container inside the job.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# CI only reads the repository.
+permissions:
+  contents: read
+
+# A new push to the same PR or branch cancels the outdated run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  database:
+    name: Database tests and demo seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: xrpl
+          POSTGRES_PASSWORD: xrpl_ci_only
+          POSTGRES_DB: xrpl_ticketing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xrpl -d xrpl_ticketing"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Credentials for the job's own throwaway container, not a secret.
+      DATABASE_URL: postgresql://xrpl:xrpl_ci_only@localhost:5432/xrpl_ticketing
+      TEST_DATABASE_URL: postgresql://xrpl:xrpl_ci_only@localhost:5432/xrpl_ticketing_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Create the test database
+        # Same init script docker-compose runs locally.
+        run: docker exec -i "${{ job.services.postgres.id }}" psql -v ON_ERROR_STOP=1 -U xrpl -d xrpl_ticketing < docker/postgres/init/01-create-test-db.sql
+      - name: Database integration tests
+        run: npm run test:db
+      - name: Apply migrations and seed demo data (twice, to check it is idempotent)
+        run: |
+          npm run db:deploy
+          npm run db:seed
+          npm run db:seed

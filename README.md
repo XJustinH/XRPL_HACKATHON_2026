@@ -11,6 +11,7 @@ resell in-app, and organisers verify current on-chain ownership for one-time ent
 - Architecture, trust boundaries and demo scope: [docs/architecture.md](docs/architecture.md)
 - Agent/issue ownership and planned API routes: [docs/CLAUDE_AGENT_HANDOFFS.md](docs/CLAUDE_AGENT_HANDOFFS.md)
 - Branch, commit and PR conventions: [CONTRIBUTING.md](CONTRIBUTING.md)
+- CI checks, environment variables and deployment steps: [docs/ci-and-deployment.md](docs/ci-and-deployment.md)
 
 ## Team
 - XU TAO JUSTIN HE – @XJustinH
