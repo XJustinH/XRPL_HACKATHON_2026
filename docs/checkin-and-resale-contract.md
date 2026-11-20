@@ -1,9 +1,9 @@
 # Check-in and resale policy contract (Agent D)
 
 Covers XRPL-044, 045, 046, 047 (check-in) and XRPL-037 (in-app resale policy).
-Status: **core logic, Prisma store and the four `/api/checkin/*` routes are done.** Two inputs are
-not connected yet, so those steps answer `503` instead of guessing: wallet-proof verification
-(XRPL-012) and XRPL ownership reads (Agent B, PR #110). See "Wiring status".
+Status: **core logic, Prisma store and the four `/api/checkin/*` routes are done.** XRPL ownership
+checks are live on Testnet via Agent B's read service. Wallet-proof verification (XRPL-012) is not
+connected yet, so that step answers `503` instead of guessing. See "Wiring status".
 
 | File | What it is |
 |---|---|
@@ -99,7 +99,6 @@ Failures use the standard envelope `{ error: { code: <status>, message }, reques
 | A (XRPL-012) | Session with a **verified** wallet address | `issueChallenge` (never from the request body) |
 | A/B (XRPL-012) | `WalletProofVerifier.verify(message, proof)`, e.g. Xaman SignIn | `proveControl` |
 | A (XRPL-013) | Role check to replace the interim rule in `organiser-access.ts` | Scanner routes |
-| B (XRPL-007, PR #110) | `verifyOwner(nftokenId, address)` on a validated ledger, already adapted in `xrpl-ownership.ts` | Gate checks |
 | A (XRPL-020) | Real `InventoryPort.getAvailability` | Resale policy |
 | B (XRPL-036) | Real `OfferPort.listResaleOffers` (live offers only) | Resale listings |
 | C (XRPL-034) | Ticket view renders `qrPayload` as a QR with an "Approve in wallet" step, refreshing at `expiresAt` | Attendee side |
@@ -122,7 +121,7 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 |---|---|---|
 | Tickets, challenges, check-ins | Prisma (live) | — |
 | Who may scan | Interim: the event's own seller (SELLER/ORGANISER role) | Agent A's role check (XRPL-013) |
-| XRPL ownership | `unavailableLedger` → 503 `LEDGER_UNAVAILABLE` | `new XrplLedgerOwnership(getXrplQueryService())` once PR #110 merges |
+| XRPL ownership | Live: `XrplLedgerOwnership` over `getXrplQueryService().verifyOwner` (created on first use; any failure → 503 `LEDGER_UNAVAILABLE`) | — |
 | Wallet proof | `unavailableProofs` → 503 | Agent A/B verifier (XRPL-012) |
 | QR key | `CHECKIN_QR_SECRET`, else derived from `SESSION_SECRET`, else (dev only) random per process | — |
 

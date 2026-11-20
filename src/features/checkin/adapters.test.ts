@@ -30,6 +30,15 @@ describe("XrplLedgerOwnership", () => {
     await expect(own.checkOwner(NFT, ADDR)).rejects.toBeInstanceOf(LedgerUnavailableError);
     await expect(unavailableLedger.checkOwner(NFT, ADDR)).rejects.toBeInstanceOf(LedgerUnavailableError);
   });
+
+  it("turns a synchronous setup failure into unavailable too", async () => {
+    const own = new XrplLedgerOwnership({
+      verifyOwner: () => {
+        throw new Error("XRPL_WS_URL is not configured");
+      },
+    });
+    await expect(own.checkOwner(NFT, ADDR)).rejects.toBeInstanceOf(LedgerUnavailableError);
+  });
 });
 
 describe("EventSellerAccess (interim organiser rule)", () => {
