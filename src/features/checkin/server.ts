@@ -3,17 +3,20 @@
  *
  * Pieces that other agents have not delivered yet answer 503 instead of guessing:
  *  - wallet-control proof verification (XRPL-012)  -> `unavailableProofs`
- *  - XRPL ownership reads (XRPL-007, PR #110)       -> `unavailableLedger`
- * Swap them in `buildCheckInService` once they land.
+ * Swap it in `buildCheckInService` once it lands.
+ *
+ * XRPL ownership uses Agent B's read service (XRPL-007). It is created lazily on the first
+ * check, so a missing XRPL setting only makes ownership checks return 503, not every route.
  */
 import { createHmac, randomBytes } from "node:crypto";
 import { getDb } from "@/lib/db/client";
+import { getXrplQueryService } from "@/lib/xrpl";
 import { errors } from "@/lib/http/response";
 import { CheckInService } from "./checkin-service";
 import { EventSellerAccess } from "./organiser-access";
 import type { WalletProofVerifier } from "./ports";
 import { PrismaCheckInStore, PrismaTicketDirectory } from "./prisma-store";
-import { unavailableLedger } from "./xrpl-ownership";
+import { XrplLedgerOwnership } from "./xrpl-ownership";
 
 const unavailableProofs: WalletProofVerifier = {
   async verify() {
@@ -48,7 +51,9 @@ function buildCheckInService(): CheckInService {
     {
       tickets: new PrismaTicketDirectory(db),
       organisers: new EventSellerAccess(db),
-      ledger: unavailableLedger,
+      ledger: new XrplLedgerOwnership({
+        verifyOwner: (nftokenId, address) => getXrplQueryService().verifyOwner(nftokenId, address),
+      }),
       proofs: unavailableProofs,
       store: new PrismaCheckInStore(db),
     },

@@ -26,7 +26,7 @@ export class XrplLedgerOwnership implements LedgerOwnership {
   async checkOwner(nftokenId: string, address: string): Promise<OwnershipCheck> {
     let result: Awaited<ReturnType<OwnerVerifier["verifyOwner"]>>;
     try {
-      result = await this.xrpl.verifyOwner(nftokenId, address);
+      result = await this.xrpl.verifyOwner(nftokenId, address); // sync throws are caught too
     } catch (err) {
       throw new LedgerUnavailableError(err instanceof Error ? err.message : "XRPL read failed");
     }
