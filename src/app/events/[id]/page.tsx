@@ -6,6 +6,7 @@ import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getDb } from "@/lib/db/client";
 import { safeExternalUrl } from "@/contracts";
 import { getPublishedEvent } from "@/features/events/event-store";
+import { cityBrowseHref, venueBrowseHref } from "@/features/discovery/browse-links";
 import {
   formatEventDate,
   formatXrp,
@@ -66,14 +67,28 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">Where</dt>
           <dd className="mt-1 text-sm">
-            {event.venue}, {event.city}
+            {/* Both route into the public search, so neither can expose a draft. */}
+            <Link
+              href={venueBrowseHref(event.venue, event.city)}
+              className="text-accent underline"
+            >
+              {event.venue}
+            </Link>
+            {", "}
+            <Link href={cityBrowseHref(event.city)} className="text-accent underline">
+              {event.city}
+            </Link>
           </dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">
             Organiser
           </dt>
-          <dd className="mt-1 text-sm">{event.seller.displayName}</dd>
+          <dd className="mt-1 text-sm">
+            <Link href={`/sellers/${event.seller.id}`} className="text-accent underline">
+              {event.seller.displayName}
+            </Link>
+          </dd>
         </div>
       </dl>
 

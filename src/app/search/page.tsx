@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { getDb } from "@/lib/db/client";
 import { listPublishedEvents } from "@/features/events/event-store";
 import { EventCard } from "@/features/events/event-card";
+import { getSellerProfile } from "@/features/profiles/profile-store";
 import {
   parseSearchParams,
   searchQueryString,
@@ -27,12 +28,23 @@ export default async function SearchPage({
   const params = await searchParams;
   const { filters, form, hasFilters } = parseSearchParams(params);
 
+  const db = getDb();
+
   let page: Page<EventView> | null = null;
   try {
-    page = await listPublishedEvents(getDb(), filters);
+    page = await listPublishedEvents(db, filters);
   } catch (error) {
     console.error("[discovery] event search failed", error);
   }
+
+  /*
+   * Name the organiser when the search is scoped to one. A bare id in the URL
+   * tells the reader nothing, and an unknown or non-seller id must not break
+   * the page — the filter simply returns nothing.
+   */
+  const scopedOrganiser = filters.sellerId
+    ? await getSellerProfile(db, filters.sellerId).catch(() => null)
+    : null;
 
   const inputClass =
     "mt-1 w-full rounded-lg border border-border bg-canvas px-3 py-2 text-base";
@@ -44,6 +56,24 @@ export default async function SearchPage({
         title="Search events"
         description="Find published events by name, city, venue, date or organiser."
       />
+
+      {form.sellerId ? (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-accent-soft px-5 py-4 text-sm">
+          <p className="text-accent">
+            Showing events by{" "}
+            <Link href={`/sellers/${form.sellerId}`} className="font-semibold underline">
+              {scopedOrganiser?.displayName ?? "this organiser"}
+            </Link>
+            .
+          </p>
+          <Link
+            href={`/search${searchQueryString({ ...form, sellerId: "" })}`}
+            className="font-medium text-accent underline"
+          >
+            Show all organisers
+          </Link>
+        </div>
+      ) : null}
 
       <form
         method="GET"
