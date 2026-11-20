@@ -2,7 +2,12 @@ import { ConnectionError, NotFoundError, RippledError, TimeoutError, ValidationE
 
 import type { XrplErrorBody, XrplErrorCode } from "@/contracts/xrpl";
 
-const RETRYABLE_CODES: ReadonlySet<XrplErrorCode> = new Set(["TIMEOUT", "NODE_UNAVAILABLE"]);
+const RETRYABLE_CODES: ReadonlySet<XrplErrorCode> = new Set([
+  "TIMEOUT",
+  "NODE_UNAVAILABLE",
+  // A transaction that is not validated yet may be validated on the next ledger.
+  "NOT_VALIDATED",
+]);
 
 // rippled/Clio error tokens, grouped by how callers should react.
 const NOT_FOUND_ERRORS = new Set([

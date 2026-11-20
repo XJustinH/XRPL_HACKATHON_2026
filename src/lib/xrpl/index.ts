@@ -6,3 +6,5 @@ export * from "./config";
 export * from "./errors";
 export * from "./client";
 export * from "./explorer";
+export * from "./query";
+export * from "./http";

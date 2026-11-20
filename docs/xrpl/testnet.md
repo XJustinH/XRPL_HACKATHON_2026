@@ -77,6 +77,9 @@ const status = await xrpl.getNetworkStatus(); // XrplNetworkStatus (src/contract
 const { response, endpoint } = await xrpl.request({ command: "account_info", account });
 ```
 
+For ledger reads (ownership, offers, transaction status), use the query service rather than raw requests:
+see [read-service.md](read-service.md).
+
 `request()` is for **idempotent reads**. On a timeout or dropped connection it fails over to the next
 node and retries once. Do not use it to submit transactions.
 
@@ -90,8 +93,10 @@ Every failure is an `XrplServiceError` with a stable `code`:
 | `TIMEOUT` | Node did not answer in time | Yes |
 | `NODE_UNAVAILABLE` | No node reachable, or node busy/not synced | Yes |
 | `WRONG_NETWORK` | Node is not on the configured network | No (fix config) |
+| `NOT_VALIDATED` | Transaction not in a validated ledger yet | Yes |
+| `TX_FAILED` | Transaction validated with a non-`tesSUCCESS` result | No |
 | `RPC_ERROR` | Other ledger error | No |
 | `UNEXPECTED` | Unclassified failure | No |
 
-API routes map these onto the shared envelope (`LEDGER_UNAVAILABLE` etc. in `src/contracts/common.ts`).
-That mapping arrives with the first XRPL routes (XRPL-007).
+API routes map these onto the shared envelope with `toLedgerAppError()`; the table is in
+[read-service.md](read-service.md#http-routes).
