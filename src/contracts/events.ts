@@ -261,6 +261,8 @@ export const SellerProfilePatch = z.object({
   bio: z.string().trim().max(1_000).optional(),
   city: z.string().trim().max(80).optional(),
   websiteUrl: z.union([z.url(), z.literal("")]).optional(),
+  /** Profile image. Stored as a URL; media hosting itself is XRPL-071. */
+  imageUrl: z.union([z.url(), z.literal("")]).optional(),
   socialLinks: z.array(SocialLink).max(6).optional(),
 });
 export type SellerProfilePatch = z.infer<typeof SellerProfilePatch>;
@@ -271,9 +273,15 @@ export type SellerProfile = {
   bio: string;
   city: string | null;
   websiteUrl: string | null;
+  imageUrl: string | null;
   socialLinks: SocialLink[];
+  /**
+   * Reserved for a future verification process. Always false today, and the UI
+   * must not present it as a trust signal until one exists.
+   */
   isVerified: boolean;
-  followerCount: number;
+  /** Null until follows exist (XRPL-061), so the UI can omit it rather than show 0. */
+  followerCount: number | null;
   publishedEventCount: number;
   joinedAt: IsoDateTime;
 };

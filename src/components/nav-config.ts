@@ -32,6 +32,12 @@ export const primaryNav: NavItem[] = [
 
 export const accountNav: NavItem[] = [
   { href: "/profile", label: "Profile", requiresSession: true },
+  {
+    href: "/seller/profile",
+    label: "Your storefront",
+    roles: ["SELLER", "ORGANISER"],
+    requiresSession: true,
+  },
   { href: "/following", label: "Following", requiresSession: true },
 ];
 
