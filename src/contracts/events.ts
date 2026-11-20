@@ -278,14 +278,28 @@ export type Page<T> = { items: T[]; nextCursor: string | null };
 export const EventSort = z.enum(["SOONEST", "PRICE_ASC", "RECOMMENDED"]);
 export type EventSort = z.infer<typeof EventSort>;
 
+/**
+ * Filters for the public event search (XRPL-059).
+ *
+ * Every field here is actually applied. Two filters named in the backlog are
+ * deliberately absent rather than accepted and ignored:
+ *
+ *  - **category** needs an `Event.category` column, which does not exist yet.
+ *  - **maxPriceDrops** needs a numeric comparison, but `priceDrops` is stored
+ *    as a decimal string for precision, where `"9" > "10"` lexicographically.
+ *    It needs an indexed numeric column or a raw query to be correct.
+ *
+ * `sort` is limited to SOONEST because the cursor is a keyset over
+ * (startsAt, id); other orderings need their own cursor and arrive with the
+ * ranking work in XRPL-089.
+ */
 export const EventQuery = z.object({
   q: z.string().trim().max(120).optional(),
   city: z.string().trim().max(80).optional(),
+  venue: z.string().trim().max(160).optional(),
   from: IsoDateTime.optional(),
   to: IsoDateTime.optional(),
-  maxPriceDrops: Drops.optional(),
   sellerId: AppId.optional(),
-  sort: EventSort.default("SOONEST"),
   cursor: z.string().min(1).max(512).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(12),
 });
