@@ -8,6 +8,9 @@ npm run db:up          # Postgres, if it isn't running
 npm run test:testnet   # about 30 seconds; needs the internet
 ```
 
+To run it without a local setup, use GitHub: **Actions → Testnet lifecycle → Run workflow**
+(`.github/workflows/testnet.yml`).
+
 It is **not part of CI or `npm test`**: it depends on the public Testnet and its faucet, which can be slow
 or down. Run it before merging ledger changes and before the demo rehearsal. It uses the same `*_test`
 database as `npm run test:db` and wipes it, so don't run the two at the same time.
@@ -18,8 +21,8 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 |---|---|
 | Mint a ticket NFT. The ticket becomes `MINTED` only from the validated ledger result, and is recorded exactly once | Runs |
 | Look up the NFT on the ledger: the seller's wallet holds it, and it is transferable with the ticket's metadata URI | Runs |
-| Primary sell offer | To do: needs XRPL-029 |
-| A buyer accepts the offer and becomes the owner | To do: needs XRPL-031 |
+| List the ticket for sale at its tier price. The offer becomes `ACTIVE` only once validated, the ledger shows the same open sell offer (seller, price, no destination), and it appears in the event's public listing | Runs |
+| A buyer accepts the offer with their own wallet. Recorded as sold, with the buyer as owner, only from the validated ledger result. On the ledger the buyer holds the NFT, the seller doesn't, and the offer is gone. The ticket leaves the public listing | Runs |
 | Resale or private transfer to a friend | To do: needs XRPL-036, XRPL-039, XRPL-040 |
 | The holder checks in once, and a second check-in is rejected | To do: needs XRPL-045, XRPL-047 |
 
@@ -42,7 +45,7 @@ affects how explorers display the NFTs.
 
 ## Adding the next steps
 
-- **A step that needs another person's wallet**, such as a buyer accepting an offer: fund another wallet
-  with `fundTestWallet()` and pass it to `AutoApproveXaman`, which signs for any wallet it was given.
+- **A step that needs another person's wallet**: fund another wallet with `fundTestWallet()` and pass it to
+  `AutoApproveXaman`, which signs for any wallet it was given (the purchase step does this for the buyer).
 - **Check-in** proves wallet control with a Xaman sign-in rather than a transaction. The double will need
   to answer sign-in requests too.

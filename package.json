@@ -12,6 +12,7 @@
     "test:watch": "vitest --project unit",
     "test:db": "vitest run --project db",
     "test:testnet": "vitest run --project testnet",
+    "test:e2e": "playwright test",
     "postinstall": "prisma generate",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
@@ -35,6 +36,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/postcss": "4.1.14",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.9.1",
