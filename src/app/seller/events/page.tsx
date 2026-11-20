@@ -25,7 +25,11 @@ function EventRow({ event }: { event: EventView }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold">{event.title}</h3>
+            <h3 className="text-base font-semibold">
+              <Link href={`/seller/events/${event.id}`} className="hover:underline">
+                {event.title}
+              </Link>
+            </h3>
             <Badge tone={event.status === "PUBLISHED" ? "positive" : "neutral"}>
               {event.status === "PUBLISHED" ? "Published" : "Draft"}
             </Badge>
@@ -46,6 +50,12 @@ function EventRow({ event }: { event: EventView }) {
             )}
           </p>
         </div>
+        <Link
+          href={`/seller/events/${event.id}`}
+          className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface"
+        >
+          {event.tiers.length === 0 ? "Add tickets" : "Manage tickets"}
+        </Link>
       </div>
     </li>
   );
