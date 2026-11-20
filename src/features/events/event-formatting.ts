@@ -30,6 +30,53 @@ export function formatXrp(drops: Drops): string {
   return `${whole}.${fractionText} XRP`;
 }
 
+export const XRP_DECIMAL_PLACES = 6;
+
+export type XrpParseResult =
+  | { ok: true; drops: Drops }
+  | { ok: false; message: string };
+
+/**
+ * Converts a seller-entered XRP amount into integer drops.
+ *
+ * Sellers price tickets in XRP; the contract and database store drops. The
+ * conversion is done on the decimal string rather than by multiplying a float,
+ * because `0.1 * 1e6` is not exactly 100000 in binary floating point and a
+ * price must never be off by a drop.
+ */
+export function xrpToDrops(input: string): XrpParseResult {
+  const text = input.trim();
+  if (!text) return { ok: false, message: "Price is required" };
+  if (text.startsWith("-")) return { ok: false, message: "Price cannot be negative" };
+
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(text);
+  if (!match || (!match[1] && !match[2])) {
+    return { ok: false, message: "Enter a price in XRP, for example 2.5" };
+  }
+
+  const whole = match[1] ?? "";
+  const fraction = match[2] ?? "";
+  if (fraction.length > XRP_DECIMAL_PLACES) {
+    return { ok: false, message: `XRP supports at most ${XRP_DECIMAL_PLACES} decimal places` };
+  }
+
+  const drops = `${whole || "0"}${fraction.padEnd(XRP_DECIMAL_PLACES, "0")}`.replace(
+    /^0+(?=\d)/,
+    "",
+  );
+  return { ok: true, drops };
+}
+
+/** Renders drops as a plain decimal XRP value for a number input (no unit). */
+export function dropsToXrpInput(drops: Drops): string {
+  if (!DROPS_PATTERN.test(drops)) return "";
+  const value = BigInt(drops);
+  const whole = value / DROPS_PER_XRP;
+  const fraction = value % DROPS_PER_XRP;
+  if (fraction === 0n) return whole.toString();
+  return `${whole}.${fraction.toString().padStart(XRP_DECIMAL_PLACES, "0").replace(/0+$/, "")}`;
+}
+
 /** The cheapest tier price, or null when an event has no tiers yet. */
 export function lowestPriceDrops(tiers: { priceDrops: Drops }[]): Drops | null {
   let lowest: bigint | null = null;
