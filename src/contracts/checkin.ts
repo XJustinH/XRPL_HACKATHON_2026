@@ -164,3 +164,32 @@ export type EventInventory = {
   checkedIn: number;
   calculatedAt: IsoDateTime;
 };
+
+// ---------------------------------------------------------------------------
+// Organiser analytics (XRPL-076/077)
+// ---------------------------------------------------------------------------
+
+/** GET /api/organisers/events/:id/metrics */
+export type EventMetrics = {
+  eventId: string;
+  /** Tickets offered across all tiers. */
+  ticketsTotal: number;
+  /** Validated primary sales. */
+  primarySold: number;
+  /** Sum of accepted primary offers, integer drops. */
+  primaryRevenueDrops: string;
+  /** Accepted public resale offers. */
+  resales: number;
+  /** Sum of accepted resale offers, integer drops. */
+  resaleVolumeDrops: string;
+  /** Accepted recipient-specific sales and zero-price gifts. */
+  privateTransfers: number;
+  gifts: number;
+  checkedIn: number;
+  /** Sold but not (yet) checked in. */
+  notCheckedIn: number;
+  /** Check-ins per time bucket, oldest first; empty buckets included. */
+  checkInTimeline: { start: IsoDateTime; count: number }[];
+  bucketMinutes: number;
+  calculatedAt: IsoDateTime;
+};

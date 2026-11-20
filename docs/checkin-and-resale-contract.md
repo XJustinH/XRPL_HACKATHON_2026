@@ -164,3 +164,21 @@ Everything is read on the server from records written only after a validated XRP
 purchase appears once it is confirmed, never from optimistic client state. **Refresh** re-reads.
 "Primary sold out" here is a display figure. The resale rule uses Agent A's `InventoryPort` (XRPL-020).
 The handoff's `GET /api/events/:id/inventory` is Agent A's route; this page reads the same data directly.
+
+## Organiser analytics (XRPL-076/077)
+
+`/organiser/events/:id/analytics` (Analytics tab) and `GET /api/organisers/events/:id/metrics`, event's
+seller only.
+
+| Figure | Counted from |
+|---|---|
+| Tickets sold | `TicketNFT.primarySoldAt` set |
+| Primary revenue | sum of `PRIMARY` offers in state `ACCEPTED` (validated accept), integer drops |
+| Resales / volume | `RESALE` offers `ACCEPTED` (listed or cancelled ones are excluded) |
+| Private transfers / gifts | `PRIVATE` / `GIFT` offers `ACCEPTED` |
+| Checked in / not checked in | `CheckInRecord` count; sold − checked in |
+| Check-ins over time | `CheckInRecord.scannedAt` in 5–1440-minute buckets (≤ 32 bars, empty buckets kept) |
+
+The chart has one series, so no legend. It has a hover and focus tooltip on every bar, and a
+"Show as table" view. Bar colour is `#1d4ed8` in light mode and `#5f88ee` in dark mode, both passing
+the dataviz palette checks against the card surface. Resales made outside the app are not counted.
