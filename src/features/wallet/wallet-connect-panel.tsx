@@ -1,8 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import type { WalletVerifyResponse } from "@/contracts/auth";
 import type { WalletReadiness } from "@/contracts/events";
 import type { SignRequest } from "@/contracts/xrpl";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
@@ -23,28 +25,95 @@ const NETWORK_NAMES: Record<string, string> = {
   DEVNET: "XRPL Devnet",
 };
 
+type VerifyResult = { ok: true; data: WalletVerifyResponse } | { ok: false; message: string };
+
+/** XRPL-012: prove the signed request to the server, which links the wallet to the session. */
+async function verifyWalletSignIn(signRequestId: string): Promise<VerifyResult> {
+  try {
+    const response = await fetch("/api/auth/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ signRequestId }),
+      cache: "no-store",
+    });
+    const body = (await response.json().catch(() => ({}))) as {
+      data?: WalletVerifyResponse;
+      error?: { message?: string };
+    };
+    if (response.ok && body.data) return { ok: true, data: body.data };
+    return { ok: false, message: body.error?.message ?? "Your wallet could not be confirmed. Try again." };
+  } catch {
+    return { ok: false, message: "Couldn't reach the server to confirm your wallet. Try again." };
+  }
+}
+
 /**
  * Connect / disconnect an XRPL wallet through Xaman (XRPL-011). The user approves a
  * sign-in request in their own Xaman app; the app only ever sees the public address.
- * `testTransactions` adds the developer approval check (XRPL-014); the page passes
- * the server's setting.
+ * Connecting proves wallet control to the server and signs in (XRPL-012); disconnecting
+ * signs out. `testTransactions` adds the developer approval check (XRPL-014); the page
+ * passes the server's setting.
+ *
+ * `verifiedWallet` is the wallet the server has proven for this session (null = none).
+ * When given, it decides what counts as connected; when omitted, this browser's copy does.
  */
 export function WalletConnectPanel({
   pollIntervalMs,
   testTransactions = false,
+  verifiedWallet,
 }: {
   pollIntervalMs?: number;
   testTransactions?: boolean;
+  verifiedWallet?: ConnectedWallet | null;
 }) {
-  const wallet = useConnectedWallet();
-  const onConnected = useCallback((request: SignRequest & { account: string }) => {
-    saveConnectedWallet({
-      address: request.account,
-      network: request.walletNetwork ?? "",
-      connectedAt: new Date().toISOString(),
-    });
-  }, []);
-  const { state, start, cancel, reset } = useSignIn({ onConnected, pollIntervalMs });
+  const router = useRouter();
+  const stored = useConnectedWallet();
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  // Keep this browser's copy in line with the server's proof.
+  useEffect(() => {
+    if (verifiedWallet === undefined) return;
+    if (verifiedWallet === null && stored) clearConnectedWallet();
+    if (verifiedWallet && stored?.address !== verifiedWallet.address) saveConnectedWallet(verifiedWallet);
+  }, [verifiedWallet, stored]);
+
+  const wallet: ConnectedWallet | null = verifiedWallet === undefined ? stored : verifiedWallet;
+
+  const onConnected = useCallback(
+    async (request: SignRequest & { account: string }) => {
+      setVerifyError(null);
+      setVerifying(true);
+      const result = await verifyWalletSignIn(request.id);
+      setVerifying(false);
+      if (!result.ok) {
+        setVerifyError(result.message);
+        return;
+      }
+      saveConnectedWallet({
+        address: result.data.wallet.address,
+        network: result.data.wallet.network,
+        connectedAt: result.data.wallet.verifiedAt,
+      });
+      if (result.data.needsOnboarding) router.push("/onboarding");
+      router.refresh();
+    },
+    [router],
+  );
+  const { state, start, cancel, reset } = useSignIn({
+    onConnected: (request) => void onConnected(request),
+    pollIntervalMs,
+    startUrl: "/api/auth/challenge",
+  });
+
+  if (verifying) {
+    return (
+      <section className={card} aria-live="polite">
+        <h2 className="text-base font-semibold">Confirming your wallet…</h2>
+        <p className="mt-1 text-sm text-muted">Checking the signature from Xaman before signing you in.</p>
+      </section>
+    );
+  }
 
   if (wallet) {
     return (
@@ -52,14 +121,26 @@ export function WalletConnectPanel({
         wallet={wallet}
         testTransactions={testTransactions}
         pollIntervalMs={pollIntervalMs}
-        onDisconnect={() => {
+        onDisconnect={async () => {
+          await fetch("/api/auth/logout", { method: "POST", cache: "no-store" }).catch(() => undefined);
           clearConnectedWallet();
           reset();
+          router.refresh();
         }}
       />
     );
   }
-  return <ConnectCard state={state} onStart={() => void start()} onCancel={() => void cancel()} />;
+  return (
+    <ConnectCard
+      state={state}
+      extraError={verifyError}
+      onStart={() => {
+        setVerifyError(null);
+        void start();
+      }}
+      onCancel={() => void cancel()}
+    />
+  );
 }
 
 function outcomeOf(state: SignInState): { tone: "caution" | "critical"; text: string } | null {
@@ -87,10 +168,13 @@ function outcomeOf(state: SignInState): { tone: "caution" | "critical"; text: st
 
 function ConnectCard({
   state,
+  extraError = null,
   onStart,
   onCancel,
 }: {
   state: SignInState;
+  /** Server-side verification failure (XRPL-012), shown like other outcomes. */
+  extraError?: string | null;
   onStart: () => void;
   onCancel: () => void;
 }) {
@@ -136,7 +220,7 @@ function ConnectCard({
     );
   }
 
-  const outcome = outcomeOf(state);
+  const outcome = extraError ? { tone: "critical" as const, text: extraError } : outcomeOf(state);
   return (
     <section className={card} aria-labelledby="wallet-connect-heading">
       <h2 id="wallet-connect-heading" className="text-base font-semibold">
@@ -196,7 +280,7 @@ function ConnectedWalletCard({
         </button>
       </div>
       <p className="mt-3 text-xs text-muted">
-        Disconnecting forgets this wallet in this browser. Your wallet and funds are not affected.
+        Disconnecting signs you out and forgets this wallet in this browser. Your wallet and funds are not affected.
       </p>
       {testTransactions ? (
         <TestTransactionCheck key={wallet.address} address={wallet.address} pollIntervalMs={pollIntervalMs} />

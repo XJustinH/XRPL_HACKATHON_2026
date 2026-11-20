@@ -38,8 +38,11 @@ Check readiness: `curl http://localhost:3000/api/health` returns
 `SERVICE_UNAVAILABLE` error when the database is down.
 
 Try onboarding at <http://localhost:3000/onboarding>: create a customer or seller profile, or continue as a
-seeded demo account. Sellers see **Manage events** in the navigation and customers don't. Wallet sign-in
-comes later (XRPL-012); until then profiles are not linked to a wallet and cannot sign transactions.
+seeded demo account. Sellers see **Manage events** in the navigation and customers don't.
+
+Sign in with a wallet at <http://localhost:3000/connect>. This needs `XAMAN_API_KEY` / `XAMAN_API_SECRET` in
+`.env` and a Testnet account in the Xaman app. The server verifies the signed Xaman SignIn before linking
+the wallet ([docs/auth/wallet-sign-in.md](docs/auth/wallet-sign-in.md)).
 
 ### Scripts
 

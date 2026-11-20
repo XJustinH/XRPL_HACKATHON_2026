@@ -12,6 +12,11 @@ export async function loadMe(db: Pick<PrismaClient, "user">, session: AuthSessio
   return {
     user: toUserDto(user),
     wallets: user.wallets.map(toWalletLinkDto),
-    session: { method: session.method, expiresAt: session.expiresAt.toISOString() },
+    session: {
+      method: session.method,
+      expiresAt: session.expiresAt.toISOString(),
+      walletAddress: session.walletAddress,
+      walletVerifiedAt: session.walletVerifiedAt?.toISOString() ?? null,
+    },
   };
 }

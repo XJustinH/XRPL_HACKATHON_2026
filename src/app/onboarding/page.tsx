@@ -55,7 +55,13 @@ export default async function OnboardingPage() {
                 Verified wallet: <span className="font-mono">{session.walletAddress}</span>
               </>
             ) : (
-              "No wallet linked yet. You'll approve every transaction in your own wallet once wallet sign-in is available."
+              <>
+                No wallet proven in this session yet.{" "}
+                <Link href="/connect" className="font-medium text-accent underline">
+                  Connect your Xaman wallet
+                </Link>{" "}
+                to buy, sell or check in with tickets.
+              </>
             )}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
@@ -82,6 +88,15 @@ export default async function OnboardingPage() {
       <section className="rounded-card border border-border bg-surface p-5">
         <OnboardingForm finishingExistingAccount={Boolean(session)} />
       </section>
+      {session ? null : (
+        <p className="mt-4 text-sm text-muted">
+          Already use Xaman?{" "}
+          <Link href="/connect" className="font-medium text-accent underline">
+            Sign in with your wallet
+          </Link>{" "}
+          instead.
+        </p>
+      )}
       {demoSection}
     </>
   );

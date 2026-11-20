@@ -1,7 +1,8 @@
 # src/lib/auth — Agent A
 
-Sessions and onboarding (XRPL-010). Wallet-control proof (XRPL-012) and role
-enforcement (XRPL-013) build on this module.
+Sessions and onboarding (XRPL-010) and wallet sign-in / wallet-control proof (XRPL-012).
+Role enforcement (XRPL-013) builds on this module. Wallet design and verification details:
+[docs/auth/wallet-sign-in.md](../../../docs/auth/wallet-sign-in.md).
 
 ## Using a session
 
@@ -13,10 +14,12 @@ enforcement (XRPL-013) build on this module.
 | UI code using the integration ports | `sessionPort` from `session-port.ts` | implements `SessionPort` in `src/features/integration/ports.ts` |
 
 `AuthSession` has `userId`, `displayName`, `role`, `onboardedAt`, `isDemo`, `method`,
-`expiresAt` and `walletAddress`.
+`expiresAt`, `walletAddress` and `walletVerifiedAt`.
 
-- **A session is not proof of wallet control.** `walletAddress` is non-null only for a
-  wallet link verified by a wallet-signed challenge (XRPL-012). Until then it is always `null`.
+- **`walletAddress` is the account's proven wallet.** It is either proven in this session, or (real
+  accounts only) verified earlier by a wallet-signed proof and still linked. Shared demo personas count
+  only a proof made in this session, so nobody inherits another demoer's wallet. `null` means wallet
+  control is not proven. Value-moving actions are still signed in the user's own wallet.
 - **Hidden navigation is not authorisation.** Check the role on the server for every
   write. XRPL-013 will add shared role guards.
 
@@ -25,14 +28,16 @@ enforcement (XRPL-013) build on this module.
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/onboarding` | `{ displayName, role: "CUSTOMER" \| "SELLER" }`. New visitor → 201 + session cookie. Signed-in user without a role → 200. Already onboarded → 409 `ALREADY_ONBOARDED`. |
-| GET | `/api/me` | User, linked wallets, session info. 401 without a session. |
+| GET | `/api/me` | User, linked wallets, session info (incl. the proven `walletAddress`). 401 without a session. |
 | PATCH | `/api/me` | `{ displayName }`. Any `role` field → 403 `ROLE_CHANGE_FORBIDDEN`; unknown fields → 400. |
-| POST | `/api/auth/logout` | Revokes the session in the DB and clears the cookie. Idempotent. |
+| POST | `/api/auth/challenge` | Starts a wallet sign-in: one-time, expiring Xaman SignIn bound to this browser (httpOnly cookie). Optional `{ address }` → only that wallet may finish. 201 `SignRequest`. |
+| POST | `/api/auth/verify` | `{ signRequestId }` from the same browser → verifies and consumes the proof, then signs in / links the wallet. 201 new account (needs onboarding) or 200. |
+| POST | `/api/auth/logout` | Revokes the session in the DB and clears the cookie. Optional `{ forgetWallet: true }` unlinks the session's wallet. Idempotent. |
 | GET | `/api/auth/demo-personas` | Seeded demo accounts (`User.isDemo`). `enabled: false` when demo login is off. |
 | POST | `/api/auth/demo-session` | `{ userId }` of a demo persona. 404 for real accounts or when demo login is off. |
 
-UI: `/onboarding` (choose a role, use a demo account, or sign out). `/connect` links to it
-until wallet sign-in exists.
+UI: `/connect` (Agent B's wallet panel, which signs in with Xaman through challenge → verify), and
+`/onboarding` (choose a role, use a demo account, or sign out).
 
 ## Security properties
 
@@ -40,6 +45,9 @@ until wallet sign-in exists.
   `APP_BASE_URL` it is also `Secure` and named `__Host-xt_session`; otherwise it is `xt_session`.
 - Only `SHA-256(token)` is stored (`Session.tokenHash`, CHECK-constrained to a hex digest).
   Sessions last 7 days and logout revokes them server-side, so a replayed cookie gets 401.
+- Wallet proofs: single use, 10-minute window, bound to the requesting browser (only the
+  SHA-256 of the binding token is stored), signature verified locally, and the `xaman-signin` memo
+  must name the request. Replays, other browsers, wrong wallets and expired requests are rejected.
 - CSRF: `withApiHandler` rejects POST/PUT/PATCH/DELETE that a browser marks cross-site or
   whose `Origin` is not this app (403). Requests without `Origin` (webhooks, curl) pass.
 - Roles: only `CUSTOMER` and `SELLER` are self-service, chosen once. `ORGANISER` comes from
@@ -49,8 +57,8 @@ until wallet sign-in exists.
 
 ## Limitations (hackathon scope)
 
-- No rate limiting on `/api/onboarding`. Anyone can create a profile without a wallet until
-  XRPL-012. These profiles cannot sign transactions.
-- Expired and revoked session rows are not purged yet. `Session.expiresAt` is indexed for a
-  later cleanup job.
+- No rate limiting on `/api/onboarding` or `/api/auth/challenge`.
+- Accounts that sign with a regular key, or by multi-signing, can't sign in yet (422).
+- Expired and revoked session and proof rows are not purged yet (`expiresAt` is indexed for a
+  later cleanup job).
 - Demo personas are created by the demo seed (XRPL-008, Agent E), which sets `isDemo = true`.
