@@ -45,6 +45,7 @@ export const toEventDto = (e: Event): EventDto => ({
   endsAt: iso(e.endsAt),
   venue: e.venue,
   city: e.city,
+  category: e.category,
   status: e.status,
   artworkUrl: e.artworkUrl,
   publishedAt: iso(e.publishedAt),

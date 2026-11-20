@@ -82,6 +82,8 @@ export const EventDto = z.object({
   endsAt: IsoDateTime.nullable(),
   venue: z.string(),
   city: z.string(),
+  /** Null when the seller hasn't set one (allowed values: src/contracts/events.ts). */
+  category: z.string().nullable(),
   status: EventStatus,
   artworkUrl: z.string().nullable(),
   publishedAt: IsoDateTime.nullable(),
