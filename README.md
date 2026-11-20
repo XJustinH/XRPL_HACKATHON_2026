@@ -28,6 +28,7 @@ npm install                 # also generates the Prisma client
 cp .env.example .env        # then set SESSION_SECRET (see the comment in the file)
 npm run db:up               # Postgres 17 on localhost:5432 (dev + *_test databases)
 npm run db:migrate          # apply migrations to the dev database
+npm run db:seed             # optional: labelled demo users, events and tiers (docs/seed-data.md)
 npm run dev                 # http://localhost:3000
 ```
 
@@ -47,6 +48,7 @@ Check readiness: `curl http://localhost:3000/api/health` returns
 | `npm run db:up` / `db:down` | Start / stop local Postgres |
 | `npm run db:migrate` | Create/apply migrations in development (`prisma migrate dev`) |
 | `npm run db:deploy` | Apply committed migrations only (deployed environments, CI) |
+| `npm run db:seed` | Insert labelled demo users, events and ticket tiers. Idempotent ([docs/seed-data.md](docs/seed-data.md)) |
 | `npm run db:studio` | Browse data in Prisma Studio |
 
 ### Local vs deployed configuration

@@ -16,6 +16,7 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx scripts/seed/run.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
@@ -44,6 +45,7 @@
     "jsdom": "27.0.0",
     "prisma": "^7.10.1",
     "tailwindcss": "4.1.14",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
   }
