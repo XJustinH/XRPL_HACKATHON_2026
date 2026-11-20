@@ -1,14 +1,15 @@
 /**
  * Ticket, resale and check-in metrics for one event (XRPL-076).
  *
- * Only validated activity counts: primary sales are `primarySoldAt` (XRPL-032), and offer
- * amounts come from offers in state ACCEPTED (validated NFTokenAcceptOffer). XRP amounts are
- * summed as integer drops (BigInt), never floats.
+ * Confirmed figures count only validated activity: primary sales are `primarySoldAt` (XRPL-032),
+ * and offer amounts come from offers in state ACCEPTED (validated NFTokenAcceptOffer). XRP amounts
+ * are summed as integer drops (BigInt), never floats. Activity that is requested or signed but not
+ * yet validated is reported separately under `pending` and never mixed into the confirmed figures.
  */
 import type { EventMetrics } from "@/contracts/checkin";
 import type { PrismaClient } from "@/generated/prisma/client";
 
-type Db = Pick<PrismaClient, "ticketTier" | "ticketNFT" | "nFTOffer" | "checkInRecord">;
+type Db = Pick<PrismaClient, "ticketTier" | "ticketNFT" | "nFTOffer" | "checkInRecord" | "ledgerTransaction">;
 
 /** Bucket sizes tried in order; the first that keeps the timeline at or under MAX_BUCKETS wins. */
 const BUCKET_MINUTES = [5, 15, 30, 60, 120, 240, 1440] as const;
@@ -16,12 +17,22 @@ const MAX_BUCKETS = 32;
 
 export async function getEventMetrics(db: Db, eventId: string, now = new Date()): Promise<EventMetrics> {
   const accepted = { ticket: { eventId }, state: "ACCEPTED" as const };
-  const [supply, primarySold, offers, scans] = await Promise.all([
+  const [supply, primarySold, offers, scans, ticketIds, pendingListings, pendingMints] = await Promise.all([
     db.ticketTier.aggregate({ where: { eventId }, _sum: { totalSupply: true } }),
     db.ticketNFT.count({ where: { eventId, primarySoldAt: { not: null } } }),
     db.nFTOffer.findMany({ where: accepted, select: { kind: true, amountDrops: true } }),
     db.checkInRecord.findMany({ where: { eventId }, select: { scannedAt: true }, orderBy: { scannedAt: "asc" } }),
+    db.ticketNFT.findMany({ where: { eventId }, select: { id: true } }),
+    db.nFTOffer.count({ where: { ticket: { eventId }, state: "PENDING_SIGNATURE" } }),
+    db.ticketNFT.count({ where: { eventId, mintStatus: { in: ["PENDING", "SUBMITTED"] } } }),
   ]);
+  // LedgerTransaction links to tickets by id only (no relation), so filter by this event's ticket ids.
+  const pendingPurchases =
+    ticketIds.length === 0
+      ? 0
+      : await db.ledgerTransaction.count({
+          where: { status: "PENDING", type: "NFTokenAcceptOffer", relatedTicketId: { in: ticketIds.map((t) => t.id) } },
+        });
 
   let primaryRevenue = BigInt(0);
   let resaleVolume = BigInt(0);
@@ -49,6 +60,7 @@ export async function getEventMetrics(db: Db, eventId: string, now = new Date())
     gifts,
     checkedIn: scans.length,
     notCheckedIn: Math.max(0, primarySold - scans.length),
+    pending: { purchases: pendingPurchases, listings: pendingListings, mints: pendingMints },
     checkInTimeline: timeline,
     bucketMinutes,
     calculatedAt: now.toISOString(),

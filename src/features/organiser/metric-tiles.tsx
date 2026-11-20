@@ -29,3 +29,36 @@ export function MetricTiles({ metrics }: { metrics: EventMetrics }) {
     </dl>
   );
 }
+
+/**
+ * Activity not yet validated on XRPL (XRPL-076). Kept apart from the confirmed tiles and never
+ * added to them, so sellers can tell confirmed sales from pending ones.
+ */
+export function PendingActivity({ pending }: { pending: EventMetrics["pending"] }) {
+  const items = [
+    { label: "Purchases awaiting confirmation", value: pending.purchases },
+    { label: "Listings awaiting wallet signature", value: pending.listings },
+    { label: "Tickets being minted", value: pending.mints },
+  ];
+  const total = items.reduce((n, i) => n + i.value, 0);
+  return (
+    <section aria-labelledby="pending-heading" className="mt-6 rounded-card border border-dashed border-border p-4">
+      <h2 id="pending-heading" className="text-sm font-semibold">
+        Waiting for the XRP Ledger
+      </h2>
+      <p className="text-sm text-muted">Signed or requested, but not yet validated. Not counted in the figures above.</p>
+      {total === 0 ? (
+        <p className="mt-2 text-sm text-muted">Nothing pending right now.</p>
+      ) : (
+        <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+          {items.map((i) => (
+            <div key={i.label}>
+              <dt className="text-sm text-muted">{i.label}</dt>
+              <dd className="text-lg font-semibold tabular-nums">{i.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}

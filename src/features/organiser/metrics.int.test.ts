@@ -98,6 +98,36 @@ describe("getEventMetrics", () => {
     expect(m.checkInTimeline).toEqual([{ start: "2026-12-01T20:00:00.000Z", count: 1 }]);
   });
 
+  it("reports pending activity separately and never as confirmed", async () => {
+    const { event, tier } = await seed();
+    const sold = await soldTicket(event.id, tier.id);
+    await offer(sold, "RESALE", "ACCEPTED", "3000000");
+    await offer(sold, "RESALE", "ACCEPTED", "3000000"); // a second confirmed resale
+    // An in-flight resale: offer signed-and-pending, purchase transaction not yet validated.
+    n += 1;
+    await db.nFTOffer.create({
+      data: { ticketId: sold.id, nftokenId: sold.nftokenId!, kind: "RESALE", state: "PENDING_SIGNATURE", ownerAddress: A, amountDrops: "5000000" },
+    });
+    await db.ledgerTransaction.create({ data: { type: "NFTokenAcceptOffer", status: "PENDING", relatedTicketId: sold.id } });
+    await db.ledgerTransaction.create({ data: { type: "NFTokenAcceptOffer", status: "VALIDATED_SUCCESS", relatedTicketId: sold.id, hash: hex("F", 1) } });
+    n += 1;
+    await db.ticketNFT.create({ data: { eventId: event.id, tierId: tier.id, serial: n, mintStatus: "SUBMITTED" } });
+
+    const m = await getEventMetrics(db, event.id);
+    expect(m.pending).toEqual({ purchases: 1, listings: 1, mints: 1 });
+    expect(m.resales).toBe(2);
+    expect(m.resaleVolumeDrops).toBe("6000000");
+    expect(m.primarySold).toBe(1);
+  });
+
+  it("ignores pending activity on other events", async () => {
+    const a = await seed();
+    const b = await seed();
+    const other = await soldTicket(b.event.id, b.tier.id);
+    await db.ledgerTransaction.create({ data: { type: "NFTokenAcceptOffer", status: "PENDING", relatedTicketId: other.id } });
+    expect((await getEventMetrics(db, a.event.id)).pending).toEqual({ purchases: 0, listings: 0, mints: 0 });
+  });
+
   it("sums large drop amounts exactly", async () => {
     const { event, tier } = await seed();
     const t = await soldTicket(event.id, tier.id);

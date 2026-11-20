@@ -188,6 +188,18 @@ export type EventMetrics = {
   checkedIn: number;
   /** Sold but not (yet) checked in. */
   notCheckedIn: number;
+  /**
+   * Activity requested or signed but NOT yet validated on XRPL. Never included in the confirmed
+   * figures above; shown separately so sellers can tell the two apart.
+   */
+  pending: {
+    /** NFTokenAcceptOffer transactions for this event's tickets still PENDING validation. */
+    purchases: number;
+    /** Offers created in the app but not yet signed / validated (PENDING_SIGNATURE). */
+    listings: number;
+    /** Ticket mints requested or submitted but not yet validated. */
+    mints: number;
+  };
   /** Check-ins per time bucket, oldest first; empty buckets included. */
   checkInTimeline: { start: IsoDateTime; count: number }[];
   bucketMinutes: number;
