@@ -8,6 +8,7 @@ import type { ResaleEligibility } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getDb } from "@/lib/db/client";
+import { getCurrentSession } from "@/lib/auth/current-session";
 import { eventPageReads } from "@/features/events/server-deps";
 import { getPublishedEvent } from "@/features/events/event-store";
 import { formatEventDate, formatXrp, isPastEvent } from "@/features/events/event-formatting";
@@ -49,7 +50,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
    * A failure must read as "unknown", never as "available".
    */
   const reads = eventPageReads();
-  const [availability, offers, resale] = await Promise.all([
+  const [session, availability, offers, resale] = await Promise.all([
+    getCurrentSession().catch(() => null),
     reads
       .availability(id)
       .catch((error: unknown) => {
@@ -129,6 +131,17 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       {event.description ? (
         <p className="mt-6 max-w-2xl whitespace-pre-line text-sm text-muted">
           {event.description}
+        </p>
+      ) : null}
+
+      {/* Told before clicking through, so a disconnected buyer does not reach
+          the purchase step only to be stopped there (XRPL-030). */}
+      {!session?.walletAddress && !hasStarted && (offers?.length ?? 0) > 0 ? (
+        <p className="mt-6 flex flex-wrap items-center gap-3 rounded-card border border-border bg-accent-soft px-5 py-4 text-sm text-accent">
+          <span>You will need a connected wallet to buy a ticket.</span>
+          <Link href="/connect" className="font-semibold underline">
+            Connect your wallet
+          </Link>
         </p>
       ) : null}
 
