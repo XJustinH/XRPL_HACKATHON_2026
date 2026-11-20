@@ -214,6 +214,20 @@ export class XrplQueryService {
     return BigInt(openLedger) > BigInt(base) ? openLedger : base;
   }
 
+  /**
+   * Current account reserves in drops: `baseDrops` to exist, plus `incrementDrops`
+   * per owned ledger object (offers, NFT pages, ...). Funds below the total reserve
+   * cannot be spent.
+   */
+  async getReserves(): Promise<{ baseDrops: string; incrementDrops: string }> {
+    const { response, endpoint } = await this.rippled.request({ command: "server_state" });
+    const ledger = response.result.state.validated_ledger;
+    if (!ledger) {
+      throw new XrplServiceError("NODE_UNAVAILABLE", "The node has no validated ledger yet", { endpoint });
+    }
+    return { baseDrops: String(ledger.reserve_base), incrementDrops: String(ledger.reserve_inc) };
+  }
+
   /** Balance and sequence of an account. `exists` is false for a never-funded address. */
   async getAccountInfo(address: string): Promise<AccountSummary> {
     const account = parseAddress(address);

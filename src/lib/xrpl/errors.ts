@@ -7,6 +7,7 @@ const RETRYABLE_CODES: ReadonlySet<XrplErrorCode> = new Set([
   "NODE_UNAVAILABLE",
   // A transaction that is not validated yet may be validated on the next ledger.
   "NOT_VALIDATED",
+  "PROVIDER_UNAVAILABLE",
 ]);
 
 // rippled/Clio error tokens, grouped by how callers should react.

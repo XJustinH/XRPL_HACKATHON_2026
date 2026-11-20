@@ -20,6 +20,7 @@ import { XrplNetwork } from "./entities";
  * - WRONG_NETWORK: a node reported a network other than the configured one. Fatal.
  * - NOT_VALIDATED: the transaction is not (yet) in a validated ledger (retryable).
  * - TX_FAILED: the transaction was validated with a result other than tesSUCCESS.
+ * - PROVIDER_UNAVAILABLE: the wallet signing provider (Xaman) could not be reached or failed (retryable).
  * - RPC_ERROR: any other ledger error response.
  * - UNEXPECTED: an error the service could not classify.
  */
@@ -32,6 +33,7 @@ export const XrplErrorCode = z.enum([
   "WRONG_NETWORK",
   "NOT_VALIDATED",
   "TX_FAILED",
+  "PROVIDER_UNAVAILABLE",
   "RPC_ERROR",
   "UNEXPECTED",
 ]);
@@ -213,3 +215,54 @@ export const AccountSummary = z.object({
   provenance: LedgerProvenance,
 });
 export type AccountSummary = z.infer<typeof AccountSummary>;
+
+// ---------------------------------------------------------------------------
+// Wallet sign requests (XRPL-011; transaction kinds arrive with XRPL-014)
+// ---------------------------------------------------------------------------
+
+/** What the wallet is asked to sign. SIGN_IN proves control of an account and is never submitted. */
+export const SignRequestKind = z.enum(["SIGN_IN"]);
+export type SignRequestKind = z.infer<typeof SignRequestKind>;
+
+/**
+ * Lifecycle of a wallet sign request.
+ * - PENDING: waiting for the user.
+ * - OPENED: opened in the wallet but not answered yet.
+ * - SIGNED: approved in the wallet.
+ * - REJECTED: declined in the wallet.
+ * - EXPIRED: not answered in time.
+ * - CANCELLED: withdrawn by the app.
+ */
+export const SignRequestStatus = z.enum(["PENDING", "OPENED", "SIGNED", "REJECTED", "EXPIRED", "CANCELLED"]);
+export type SignRequestStatus = z.infer<typeof SignRequestStatus>;
+
+/** Statuses that will not change any more. */
+export const FINAL_SIGN_REQUEST_STATUSES: readonly SignRequestStatus[] = [
+  "SIGNED",
+  "REJECTED",
+  "EXPIRED",
+  "CANCELLED",
+];
+
+/** Body of `POST /api/wallet/sign-requests`. */
+export const CreateSignRequestBody = z.object({ kind: SignRequestKind });
+export type CreateSignRequestBody = z.infer<typeof CreateSignRequestBody>;
+
+export const SignRequest = z.object({
+  /** The wallet provider's request ID (Xaman payload UUID). */
+  id: z.uuid(),
+  kind: SignRequestKind,
+  status: SignRequestStatus,
+  /** Opens the request in Xaman: the app on mobile, a QR page on desktop. */
+  signUrl: z.url(),
+  /** QR code image to scan with Xaman from another device. */
+  qrPngUrl: z.url(),
+  expiresAt: IsoDateTime.nullable(),
+  /** Signing account once SIGNED. A public address, never a secret. */
+  account: XrplAddress.nullable(),
+  /** Network the wallet signed on, once SIGNED (e.g. "TESTNET"). */
+  walletNetwork: z.string().nullable(),
+  /** False when the wallet signed on a different network than the app uses; null until SIGNED. */
+  networkMatches: z.boolean().nullable(),
+});
+export type SignRequest = z.infer<typeof SignRequest>;

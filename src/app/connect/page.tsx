@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
+import { WalletConnectPanel } from "@/features/wallet/wallet-connect-panel";
 
 export const metadata = { title: "Connect wallet" };
 
@@ -11,10 +12,13 @@ export default function ConnectPage() {
         title="Connect your wallet"
         description="You approve every transaction in your own wallet. This platform never asks for a seed phrase or private key."
       />
-      <NotImplementedNotice
-        title="Wallet connect and session linking"
-        blockedBy="XRPL-011 (wallet connect) and XRPL-012 (proving wallet control and linking it to a session)"
-      />
+      <WalletConnectPanel />
+      <div className="mt-6">
+        <NotImplementedNotice
+          title="Linking your wallet to your account"
+          blockedBy="XRPL-012 (proving wallet control and linking it to a session)"
+        />
+      </div>
       <section className="mt-6 flex flex-col gap-3 rounded-card border border-border bg-surface p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold">No wallet yet?</h2>

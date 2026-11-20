@@ -8,3 +8,7 @@ export * from "./client";
 export * from "./explorer";
 export * from "./query";
 export * from "./http";
+export * from "./format";
+export * from "./wallet/xaman";
+export * from "./wallet/sign-requests";
+export * from "./wallet/readiness";
