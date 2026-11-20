@@ -71,6 +71,14 @@ export default async function OnboardingPage() {
             >
               Continue
             </Link>
+            {/* Optional discovery preferences (XRPL-058, Agent C). Skippable;
+                browsing works without them. */}
+            <Link
+              href="/preferences?from=onboarding"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:bg-surface"
+            >
+              Set your preferences
+            </Link>
             <SignOutButton />
           </div>
         </section>

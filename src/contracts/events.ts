@@ -304,6 +304,49 @@ export type SocialLink = z.infer<typeof SocialLink>;
 export const ProfileVisibility = z.enum(["PUBLIC", "PRIVATE"]);
 export type ProfileVisibility = z.infer<typeof ProfileVisibility>;
 
+/**
+ * Event categories, used both as a customer's declared interests (XRPL-058)
+ * and, once the column exists, as an event's own category (XRPL-015).
+ *
+ * A fixed vocabulary rather than free text, so a stated interest can actually
+ * be matched against events later (XRPL-059, XRPL-089). Adding a value is
+ * safe; renaming or removing one orphans existing selections, so the tolerant
+ * reader in `profile-settings` drops values it does not recognise.
+ */
+export const EVENT_CATEGORIES = [
+  "MUSIC",
+  "CLUB",
+  "COMEDY",
+  "THEATRE",
+  "FILM",
+  "ARTS",
+  "SPORT",
+  "FOOD",
+  "COMMUNITY",
+  "TALKS",
+  "FAMILY",
+  "OTHER",
+] as const;
+
+export const EventCategory = z.enum(EVENT_CATEGORIES);
+export type EventCategory = z.infer<typeof EventCategory>;
+
+/** Display labels. Stored values stay stable even if wording changes. */
+export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
+  MUSIC: "Live music",
+  CLUB: "Club nights",
+  COMEDY: "Comedy",
+  THEATRE: "Theatre",
+  FILM: "Film",
+  ARTS: "Arts & exhibitions",
+  SPORT: "Sport",
+  FOOD: "Food & drink",
+  COMMUNITY: "Community",
+  TALKS: "Talks & workshops",
+  FAMILY: "Family",
+  OTHER: "Something else",
+};
+
 export const SellerProfilePatch = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),
   bio: z.string().trim().max(1_000).optional(),
@@ -336,8 +379,10 @@ export type SellerProfile = {
 
 export const CustomerProfilePatch = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),
+  /** Free-text city the customer chose. Never a precise location. */
   city: z.string().trim().max(80).optional(),
-  interests: z.array(z.string().trim().min(1).max(40)).max(12).optional(),
+  /** Declared interests, from the fixed category vocabulary. */
+  interests: z.array(EventCategory).max(EVENT_CATEGORIES.length).optional(),
   visibility: ProfileVisibility.optional(),
   socialLinks: z.array(SocialLink).max(6).optional(),
 });
@@ -347,7 +392,7 @@ export type CustomerProfile = {
   id: AppId;
   displayName: string;
   city: string | null;
-  interests: string[];
+  interests: EventCategory[];
   visibility: ProfileVisibility;
   socialLinks: SocialLink[];
   joinedAt: IsoDateTime;
