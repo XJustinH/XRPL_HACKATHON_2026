@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
@@ -6,6 +7,20 @@ import { listPrimaryOffers, reconcilePrimaryOffer, requestPrimaryOffer, type Off
 import { getOfferStatus, requestPurchase, type PurchaseDeps } from "@/lib/xrpl/offers/purchase";
 import { reconcileTicketMint, requestTicketMint, type MintDeps } from "@/lib/xrpl/tickets/minting";
 import { createWalletTransactionRequests } from "@/lib/xrpl/wallet/transaction-requests";
+import { createWalletSignRequests } from "@/lib/xrpl/wallet/sign-requests";
+import { CheckInService } from "@/features/checkin/checkin-service";
+import { EventSellerAccess } from "@/features/checkin/organiser-access";
+import { PrismaCheckInStore, PrismaTicketDirectory } from "@/features/checkin/prisma-store";
+import { XamanCheckInProofs } from "@/features/checkin/xaman-proof";
+import { XrplLedgerOwnership } from "@/features/checkin/xrpl-ownership";
+import { getEventInventory } from "@/features/organiser/inventory";
+import { getEventMetrics } from "@/features/organiser/metrics";
+import { PrismaAttendance } from "@/features/reviews/attendance";
+import { PrismaReviewStore } from "@/features/reviews/prisma-store";
+import { ReviewService } from "@/features/reviews/review-service";
+import { createInventoryPort } from "@/lib/inventory/primary-inventory";
+import { PrismaResaleOffers, prismaPolicyEvents } from "@/lib/resale-policy/prisma-adapters";
+import { ResalePolicy } from "@/lib/resale-policy/resale-policy";
 import { AutoApproveXaman } from "./support/auto-approve-xaman";
 import { fundTestWallet, openTestnet, type TestWallet } from "./support/testnet";
 import { waitFor } from "./support/wait";
@@ -15,9 +30,9 @@ import { waitFor } from "./support/wait";
  * (needs the internet and `npm run db:up`; never part of CI). See tests/testnet/README.md.
  *
  * Real: the app's services, the *_test database, XRPL Testnet and its faucet.
- * Stood in for: the person approving in Xaman (AutoApproveXaman signs with a throwaway wallet), and
- * the wallet sign-in proof (XRPL-012, covered by its own tests): the seller's session starts with
- * the throwaway wallet as its proven wallet.
+ * Stood in for: the person approving in Xaman (AutoApproveXaman signs with a throwaway wallet, both
+ * transactions and check-in sign-ins), and the session's wallet sign-in proof (XRPL-012, covered by its
+ * own tests): sessions start with the throwaway wallet as their proven wallet.
  */
 
 const db = getDb();
@@ -260,5 +275,104 @@ describe("ticket lifecycle on XRPL Testnet (XRPL-050)", () => {
   });
 
   it.todo("the buyer resells the ticket or sends it privately to a friend (needs XRPL-036, XRPL-039, XRPL-040)");
-  it.todo("the current holder checks in once, and a second check-in is rejected (needs XRPL-045, XRPL-047)");
+  it("the current holder checks in once, and a second check-in is rejected (XRPL-044 to XRPL-047)", async () => {
+    // The app's check-in service, with the real store, Agent B's live ledger reads and Agent A's blob check.
+    const signIns = createWalletSignRequests(config, xaman);
+    const proofs = new XamanCheckInProofs(() => signIns, randomBytes(32).toString("base64url"));
+    const checkIn = new CheckInService(
+      {
+        tickets: new PrismaTicketDirectory(db),
+        organisers: new EventSellerAccess(db),
+        ledger: new XrplLedgerOwnership(ledger),
+        proofs,
+        store: new PrismaCheckInStore(db),
+      },
+      { qrSecret: randomBytes(32).toString("base64url") },
+    );
+    const gate = (qrPayload: string) => ({ qrPayload, organiserId: sellerId, gateEventId: eventId });
+    const approveIn = async (wallet: TestWallet, challengeId: string) => {
+      xaman.signInWith(wallet);
+      const request = await signIns.createSignIn();
+      return checkIn.proveControl({ challengeId, proof: proofs.tokenFor(challengeId, request.id) });
+    };
+
+    // The seller sold the ticket, so the ledger says their wallet can't get a door code for it.
+    expect(await checkIn.issueChallenge({ ticketId, walletAddress: seller.classicAddress })).toMatchObject({
+      status: "WRONG_OWNER",
+    });
+
+    const code = await checkIn.issueChallenge({ ticketId, walletAddress: buyer.classicAddress });
+    if (!("challengeId" in code)) throw new Error(`Expected a check-in code, got ${code.status}`);
+    expect(code.qrPayload).not.toContain(buyer.classicAddress);
+
+    // A code nobody approved in their wallet (a screenshot, say) gets nobody in.
+    expect(await checkIn.verifyScan(gate(code.qrPayload))).toMatchObject({ status: "PROOF_REQUIRED" });
+    // Another wallet can't approve the holder's code.
+    expect(await approveIn(seller, code.challengeId)).toMatchObject({ status: "INVALID_PROOF" });
+    // The holder approves in "Xaman". The signed sign-in blob is verified, not just Xaman's answer.
+    expect(await approveIn(buyer, code.challengeId)).toEqual({ status: "PROVEN", challengeId: code.challengeId });
+    expect(xaman.signIns.map((s) => s.account)).toEqual([seller.classicAddress, buyer.classicAddress]);
+
+    // At the door, ownership is read from a validated Testnet ledger.
+    const scanned = await checkIn.verifyScan(gate(code.qrPayload));
+    if (scanned.status !== "VERIFIED") throw new Error(`Expected VERIFIED, got ${scanned.status}: ${scanned.message}`);
+    expect(scanned).toMatchObject({ ticketId, eventId, nftokenId, ownerAddress: buyer.classicAddress });
+    expect(scanned.ledgerIndex).toBeGreaterThan(0);
+
+    expect(await checkIn.admit(gate(code.qrPayload))).toMatchObject({ status: "ADMITTED", ticketId, eventId });
+    // Scanning the same code again is refused, and so is a fresh code for the used ticket.
+    expect(await checkIn.admit(gate(code.qrPayload))).toMatchObject({ status: "ALREADY_USED" });
+    expect(await checkIn.issueChallenge({ ticketId, walletAddress: buyer.classicAddress })).toMatchObject({
+      status: "ALREADY_USED",
+    });
+
+    const records = await db.checkInRecord.findMany({ where: { ticketId } });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ eventId, walletAddress: buyer.classicAddress, organiserId: sellerId });
+    expect(records[0]?.verifiedLedgerIndex).toBeGreaterThan(0);
+  });
+
+  it("the organiser's inventory, analytics and resale rule reflect the real sale and entry (XRPL-021, 037, 076)", async () => {
+    const inventory = await getEventInventory(db, eventId);
+    expect(inventory.totals).toEqual({ total: 2, minted: 1, minting: 0, onSale: 0, sold: 1, unsold: 1 });
+    expect(inventory).toMatchObject({ primarySoldOut: false, checkedIn: 1 });
+
+    const metrics = await getEventMetrics(db, eventId);
+    expect(metrics).toMatchObject({
+      ticketsTotal: 2,
+      primarySold: 1,
+      primaryRevenueDrops: "1000000",
+      resales: 0,
+      checkedIn: 1,
+      notCheckedIn: 0,
+      pending: { purchases: 0, listings: 0, mints: 0 },
+    });
+    expect(metrics.checkInTimeline.reduce((n, bucket) => n + bucket.count, 0)).toBe(1);
+
+    // One of the two tickets is still unsold, so resale stays closed in the app.
+    const resale = new ResalePolicy({
+      events: prismaPolicyEvents(db),
+      inventory: createInventoryPort(db),
+      offers: new PrismaResaleOffers(db),
+    });
+    expect(await resale.getEligibility(eventId)).toMatchObject({
+      isPublicResaleAllowed: false,
+      reasonCode: "PRIMARY_STILL_ON_SALE",
+    });
+  });
+
+  it("only someone who was checked in can review the event (XRPL-079)", async () => {
+    // The buyer's wallet as a proven link (wallet sign-in, XRPL-012, is tested separately).
+    await db.walletLink.create({
+      data: { userId: buyerId, address: buyer.classicAddress, verifiedAt: new Date(), verificationProvider: "lifecycle-test" },
+    });
+    const reviews = new ReviewService({ attendance: new PrismaAttendance(db), store: new PrismaReviewStore(db) });
+
+    expect(await reviews.create(buyerId, eventId, { rating: 5, body: "Checked in on Testnet" })).toMatchObject({
+      rating: 5,
+      author: { id: buyerId },
+    });
+    await expect(reviews.create(sellerId, eventId, { rating: 5, body: "" })).rejects.toMatchObject({ code: "NOT_ATTENDED" });
+    expect(await reviews.list(eventId, null)).toMatchObject({ count: 1, averageRating: 5 });
+  });
 });
