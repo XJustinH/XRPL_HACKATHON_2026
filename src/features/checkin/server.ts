@@ -1,30 +1,35 @@
 /**
  * Server-side wiring for the check-in routes. Server-only.
  *
- * Pieces that other agents have not delivered yet answer 503 instead of guessing:
- *  - wallet-control proof verification (XRPL-012)  -> `unavailableProofs`
- * Swap it in `buildCheckInService` once it lands.
- *
- * XRPL ownership uses Agent B's read service (XRPL-007). It is created lazily on the first
- * check, so a missing XRPL setting only makes ownership checks return 503, not every route.
+ *  - Tickets, challenges, check-ins: Prisma.
+ *  - XRPL ownership: Agent B's read service (XRPL-007), `verifyOwner`.
+ *  - Wallet approval: Xaman SignIn through Agent B's sign requests (XRPL-011), see ./xaman-proof.ts.
+ * Both external services are created on first use, so a missing XRPL or Xaman setting only makes
+ * the step that needs it return 503, not every route.
  */
 import { createHmac, randomBytes } from "node:crypto";
+import type { SignRequest } from "@/contracts/xrpl";
 import { getDb } from "@/lib/db/client";
-import { getXrplQueryService } from "@/lib/xrpl";
 import { errors } from "@/lib/http/response";
+import { getXrplQueryService } from "@/lib/xrpl";
+import { getWalletSignRequests } from "@/lib/xrpl/wallet/sign-requests";
 import { CheckInService } from "./checkin-service";
 import { EventSellerAccess } from "./organiser-access";
-import type { WalletProofVerifier } from "./ports";
 import { PrismaCheckInStore, PrismaTicketDirectory } from "./prisma-store";
+import { XamanCheckInProofs } from "./xaman-proof";
 import { XrplLedgerOwnership } from "./xrpl-ownership";
 
-const unavailableProofs: WalletProofVerifier = {
-  async verify() {
-    throw errors.unavailable("Wallet approval for check-in is not available yet");
-  },
+/** Creates a wallet sign-in for a challenge and the proof token bound to it. */
+export type CheckInApproval = {
+  createSignIn(): Promise<SignRequest>;
+  tokenFor(challengeId: string, signInId: string): string;
 };
 
-type CheckInGlobal = { __checkinService?: CheckInService | null; __checkinDevSecret?: string };
+type CheckInGlobal = {
+  __checkinService?: CheckInService | null;
+  __checkinApproval?: CheckInApproval | null;
+  __checkinDevSecret?: string;
+};
 const g = globalThis as unknown as CheckInGlobal;
 
 /**
@@ -45,6 +50,13 @@ export function resolveQrSecret(env: NodeJS.ProcessEnv = process.env): string {
   return g.__checkinDevSecret;
 }
 
+/** Separate key for proof tokens, so a QR tag can never double as a proof tag. */
+const proofSecret = (qrSecret: string) => createHmac("sha256", qrSecret).update("checkin-proof-v1").digest("base64url");
+
+function buildXamanProofs(): XamanCheckInProofs {
+  return new XamanCheckInProofs(() => getWalletSignRequests(), proofSecret(resolveQrSecret()));
+}
+
 function buildCheckInService(): CheckInService {
   const db = getDb();
   return new CheckInService(
@@ -54,7 +66,7 @@ function buildCheckInService(): CheckInService {
       ledger: new XrplLedgerOwnership({
         verifyOwner: (nftokenId, address) => getXrplQueryService().verifyOwner(nftokenId, address),
       }),
-      proofs: unavailableProofs,
+      proofs: buildXamanProofs(),
       store: new PrismaCheckInStore(db),
     },
     { qrSecret: resolveQrSecret() },
@@ -64,6 +76,23 @@ function buildCheckInService(): CheckInService {
 export function getCheckInService(): CheckInService {
   g.__checkinService ??= buildCheckInService();
   return g.__checkinService;
+}
+
+export function getCheckInApproval(): CheckInApproval {
+  if (!g.__checkinApproval) {
+    const proofs = buildXamanProofs();
+    g.__checkinApproval = {
+      createSignIn: async () => {
+        try {
+          return await getWalletSignRequests().createSignIn();
+        } catch {
+          throw errors.unavailable("Could not reach Xaman to start the wallet approval. Try again.");
+        }
+      },
+      tokenFor: (challengeId, signInId) => proofs.tokenFor(challengeId, signInId),
+    };
+  }
+  return g.__checkinApproval;
 }
 
 /** Tests only: replace (or with null, reset) the service the routes use. */

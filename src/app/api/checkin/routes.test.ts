@@ -96,11 +96,34 @@ describe("check-in routes", () => {
     expect(res.status).toBe(401);
   });
 
-  it("requires a verified wallet to request a check-in code", async () => {
+  it("needs a wallet: the session's verified one or one named in the body", async () => {
     session = { userId: "attendee", walletAddress: null };
-    const res = await issue(post("/api/checkin/challenges", { ticketId: TICKET }), {});
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("WALLET_NOT_VERIFIED");
+    const none = await issue(post("/api/checkin/challenges", { ticketId: TICKET }), {});
+    expect(none.status).toBe(403);
+    expect((await none.json()).error.code).toBe("WALLET_NOT_VERIFIED");
+
+    const named = await issue(post("/api/checkin/challenges", { ticketId: TICKET, walletAddress: ALICE }), {});
+    expect(named.status).toBe(201);
+
+    const notHolder = await issue(
+      post("/api/checkin/challenges", { ticketId: TICKET, walletAddress: "rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY" }),
+      {},
+    );
+    expect(notHolder.status).toBe(403);
+    expect((await notHolder.json()).error.code).toBe("WRONG_OWNER");
+  });
+
+  it("prefers the session's verified wallet over one named in the body", async () => {
+    const res = await issue(
+      post("/api/checkin/challenges", { ticketId: TICKET, walletAddress: "rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY" }),
+      {},
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects a malformed wallet address", async () => {
+    const res = await issue(post("/api/checkin/challenges", { ticketId: TICKET, walletAddress: "not-an-address" }), {});
+    expect(res.status).toBe(400);
   });
 
   it("validates request bodies and ids", async () => {

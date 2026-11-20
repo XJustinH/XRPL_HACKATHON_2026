@@ -1,9 +1,9 @@
 # Check-in and resale policy contract (Agent D)
 
 Covers XRPL-044, 045, 046, 047 (check-in) and XRPL-037 (in-app resale policy).
-Status: **core logic, Prisma store and the four `/api/checkin/*` routes are done.** XRPL ownership
-checks are live on Testnet via Agent B's read service. Wallet-proof verification (XRPL-012) is not
-connected yet, so that step answers `503` instead of guessing. See "Wiring status".
+Status: **check-in works end to end on Testnet.** The attendee approves in Xaman (Agent B's sign
+requests, XRPL-011), ownership is read from XRPL (Agent B's read service, XRPL-007), and admission is
+recorded once in Postgres. Who may scan is still an interim rule until roles (XRPL-013) land.
 
 | File | What it is |
 |---|---|
@@ -12,6 +12,8 @@ connected yet, so that step answers `503` instead of guessing. See "Wiring statu
 | [`src/features/checkin/prisma-store.ts`](../src/features/checkin/prisma-store.ts) | `CheckInStore` / `TicketDirectory` on the XRPL-005 schema |
 | [`src/features/checkin/ports.ts`](../src/features/checkin/ports.ts) | Interfaces other agents implement |
 | [`src/features/checkin/xrpl-ownership.ts`](../src/features/checkin/xrpl-ownership.ts) | Adapter for Agent B's `verifyOwner` |
+| [`src/features/checkin/xaman-proof.ts`](../src/features/checkin/xaman-proof.ts) | Wallet approval via Xaman SignIn, bound to one challenge |
+| [`src/features/checkin/checkin-code-panel.tsx`](../src/features/checkin/checkin-code-panel.tsx) | Attendee "Show check-in code" panel (`/checkin/:ticketId`) |
 | [`src/features/checkin/organiser-access.ts`](../src/features/checkin/organiser-access.ts) | Interim "who may scan" rule |
 | [`src/features/checkin/server.ts`](../src/features/checkin/server.ts) | Route wiring and QR secret |
 | [`src/app/api/checkin/`](../src/app/api/checkin/) | Route handlers |
@@ -28,11 +30,15 @@ sequenceDiagram
   participant W as Attendee wallet
   participant O as Organiser scanner
   participant L as XRPL (Agent B)
-  A->>API: POST /api/checkin/challenges {ticketId}
-  API->>L: verifyOwner(nftokenId, session wallet)
-  API-->>A: qrPayload, messageToSign, expiresAt (2 min)
-  A->>W: sign messageToSign
+  A->>API: POST /api/checkin/challenges {ticketId, walletAddress?}
+  API->>L: verifyOwner(nftokenId, wallet)
+  API-->>A: challengeId, qrPayload, expiresAt (5 min)
+  A->>API: POST /api/checkin/challenges/:id/sign-request
+  API-->>A: Xaman sign request + proof token
+  A->>W: approve SignIn in Xaman
+  A->>API: GET /api/wallet/sign-requests/:id until SIGNED
   A->>API: POST /api/checkin/challenges/:id/prove {proof}
+  Note over A: gate QR shown only now
   O->>API: POST /api/checkin/verify {qrPayload, eventId}
   API->>L: verifyOwner(nftokenId, wallet)
   API-->>O: VERIFIED or reason (read-only)
@@ -46,9 +52,15 @@ over the challenge ID, event, ticket and expiry. The QR holds no wallet address,
 details. A tampered or forged QR, or one from another server, returns `INVALID_QR`.
 
 **Why a screenshot does not work:** a challenge is only usable after the wallet holding the NFT
-signs `messageToSign`. That text contains a random nonce, the challenge ID, event, NFT ID and expiry.
-A proof from another wallet, for another challenge, sent twice or sent after expiry is rejected. At
-the gate the ledger owner is read again, so a ticket transferred away after the proof gets `WRONG_OWNER`.
+approves it in Xaman. The proof token is `<xamanRequestId>.<hmac(challengeId, xamanRequestId)>`, so
+only a sign-in this server created **for this challenge** counts. An old `/connect` sign-in, or one
+made for another code, is rejected. The server asks Xaman (authenticated with our API key) whether that
+request was SIGNED on Testnet and by which account, and that account must be the challenge's wallet.
+At the gate the ledger owner is read again, so a ticket transferred away after approval gets `WRONG_OWNER`.
+
+**Wallet on the request:** the session's verified wallet is used when there is one (XRPL-012).
+Otherwise the attendee names the wallet connected in their browser. That claim is safe to accept:
+XRPL must show it holds the ticket, and it must approve in Xaman, before the code works.
 
 **One entry only:** `admitAtomically` runs one transaction. It consumes the challenge only
 `WHERE consumedAt IS NULL`, then inserts `CheckInRecord`, which is unique on `(ticketId, eventId)`.
@@ -96,12 +108,11 @@ Failures use the standard envelope `{ error: { code: <status>, message }, reques
 
 | From | What | Used by |
 |---|---|---|
-| A (XRPL-012) | Session with a **verified** wallet address | `issueChallenge` (never from the request body) |
-| A/B (XRPL-012) | `WalletProofVerifier.verify(message, proof)`, e.g. Xaman SignIn | `proveControl` |
+| A (XRPL-012) | Session with a verified wallet (optional now; used in preference to the named wallet) | `issueChallenge` |
 | A (XRPL-013) | Role check to replace the interim rule in `organiser-access.ts` | Scanner routes |
 | A (XRPL-020) | Real `InventoryPort.getAvailability` | Resale policy |
 | B (XRPL-036) | Real `OfferPort.listResaleOffers` (live offers only) | Resale listings |
-| C (XRPL-034) | Ticket view renders `qrPayload` as a QR with an "Approve in wallet" step, refreshing at `expiresAt` | Attendee side |
+| C (XRPL-034) | Embed `<CheckInCodePanel ticketId />` on the ticket page (interim page: `/checkin/:ticketId`) | Attendee side |
 | A (env) | Add `CHECKIN_QR_SECRET` (server-only, 32+ chars) to `src/lib/env.ts` and `.env.example`. Until then the key is derived from `SESSION_SECRET` | QR tags |
 
 ## Routes
@@ -110,7 +121,8 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 
 | Route | Body | Who | Success |
 |---|---|---|---|
-| `/api/checkin/challenges` | `{ ticketId }` | Attendee with a **verified** wallet (else 403 `WALLET_NOT_VERIFIED`) | 201 challenge + `qrPayload` + `messageToSign` |
+| `/api/checkin/challenges` | `{ ticketId, walletAddress? }` | Attendee; wallet from session or body (else 403 `WALLET_NOT_VERIFIED`) | 201 challenge + `qrPayload` |
+| `/api/checkin/challenges/:id/sign-request` | — | Attendee | 201 `{ signRequest, proof }` (Xaman SignIn) |
 | `/api/checkin/challenges/:id/prove` | `{ proof }` | Attendee | 200 `PROVEN` |
 | `/api/checkin/verify` | `{ qrPayload, eventId }` | Organiser | 200 `VERIFIED` (read-only) |
 | `/api/checkin/confirm` | `{ qrPayload, eventId }` | Organiser | 201 `ADMITTED`; repeat gives 409 `ALREADY_USED`, so retries are safe |
@@ -122,7 +134,7 @@ All are `POST`, need a session cookie, and are same-origin only (CSRF check in `
 | Tickets, challenges, check-ins | Prisma (live) | — |
 | Who may scan | Interim: the event's own seller (SELLER/ORGANISER role) | Agent A's role check (XRPL-013) |
 | XRPL ownership | Live: `XrplLedgerOwnership` over `getXrplQueryService().verifyOwner` (created on first use; any failure → 503 `LEDGER_UNAVAILABLE`) | — |
-| Wallet proof | `unavailableProofs` → 503 | Agent A/B verifier (XRPL-012) |
+| Wallet proof | Live: Xaman SignIn via `getWalletSignRequests()` (needs `XAMAN_API_KEY`/`SECRET`; else 503) | — |
 | QR key | `CHECKIN_QR_SECRET`, else derived from `SESSION_SECRET`, else (dev only) random per process | — |
 
 ## Organiser gate screen (XRPL-048)

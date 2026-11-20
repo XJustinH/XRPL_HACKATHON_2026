@@ -17,4 +17,4 @@ export function checkInResponse<T extends object>(result: T | CheckInFailure, su
 }
 
 export const walletNotVerified = () =>
-  new AppError("WALLET_NOT_VERIFIED", "Link and verify your XRPL wallet before checking in.", 403);
+  new AppError("WALLET_NOT_VERIFIED", "Connect the XRPL wallet that holds this ticket before checking in.", 403);

@@ -2,7 +2,7 @@
  * Check-in core (XRPL-044 challenge/QR, XRPL-045 wallet-control proof,
  * XRPL-046 ledger validation, XRPL-047 atomic one-time admission).
  *
- *  1. Attendee (session with verified wallet) -> issueChallenge(): 2-minute, event-bound
+ *  1. Attendee (wallet that holds the ticket) -> issueChallenge(): 5-minute, event-bound
  *     challenge, shown as a QR plus a message for their wallet to sign.
  *  2. Attendee wallet signs -> proveControl(): proof must be from the challenge's wallet,
  *     over this challenge's message, and is accepted once.
@@ -36,7 +36,8 @@ import {
 } from "./ports";
 
 const QR_PREFIX = "xtc1";
-export const DEFAULT_CHALLENGE_TTL_MS = 2 * 60 * 1000;
+/** Matches Xaman sign-in expiry, so approving in the wallet does not eat the time at the gate. */
+export const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 export type CheckInServiceDeps = {
   tickets: TicketDirectory;
@@ -111,6 +112,19 @@ export class CheckInService {
     };
   }
 
+  /**
+   * Whether a challenge can still be approved in the wallet. Used before creating a
+   * wallet sign request, so the attendee is not sent to Xaman for a dead code.
+   */
+  async checkApprovable(challengeId: string): Promise<{ status: "APPROVABLE"; challengeId: string } | CheckInFailure> {
+    const challenge = await this.deps.store.getChallenge(challengeId);
+    if (!challenge) return fail("UNKNOWN_TICKET", "Check-in request not found.");
+    if (challenge.consumedAt) return fail("ALREADY_USED", "This check-in request has already been used.");
+    if (this.isExpired(challenge)) return fail("EXPIRED", "This check-in request has expired. Generate a new one.");
+    if (challenge.proofReference) return fail("INVALID_PROOF", "This check-in request has already been approved.");
+    return { status: "APPROVABLE", challengeId };
+  }
+
   /** XRPL-045. */
   async proveControl(input: { challengeId: string; proof: string }): Promise<CheckInProven | CheckInFailure> {
     const challenge = await this.deps.store.getChallenge(input.challengeId);
@@ -122,7 +136,11 @@ export class CheckInService {
     const ticket = await this.deps.tickets.findTicket(challenge.ticketId);
     if (!ticket?.nftokenId) return fail("UNKNOWN_TICKET", "Ticket not found.");
 
-    const signer = await this.deps.proofs.verify(buildMessageToSign(challenge, ticket.nftokenId), input.proof);
+    const signer = await this.deps.proofs.verify({
+      challengeId: challenge.id,
+      message: buildMessageToSign(challenge, ticket.nftokenId),
+      proof: input.proof,
+    });
     if (!signer) return fail("INVALID_PROOF", "Wallet proof could not be verified.");
     if (signer !== challenge.walletAddress) {
       return fail("INVALID_PROOF", "Proof was signed by a different wallet than the ticket holder.");

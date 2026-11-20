@@ -59,7 +59,7 @@ export class FakeProofs implements WalletProofVerifier {
   static sign(address: XrplAddress, message: string) {
     return `signed:${address}:${simpleHash(message)}`;
   }
-  async verify(message: string, proof: string) {
+  async verify({ message, proof }: { challengeId: string; message: string; proof: string }) {
     const [kind, address, digest] = proof.split(":");
     if (kind !== "signed" || !address || digest !== simpleHash(message)) return null;
     return address;
