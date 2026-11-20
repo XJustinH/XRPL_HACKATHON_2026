@@ -45,7 +45,8 @@ status checks for `main` (Settings → Rules or Branches).
 | `DEMO_LOGIN_ENABLED` | App | No | Lets visitors use seeded demo accounts without a wallet. On by default locally, **off by default in production**. Set `true` only on a demo deployment. |
 | `NEXT_PUBLIC_XRPL_NETWORK_LABEL` | UI | No | Shipped to the browser, so it must never hold a secret. |
 | `XRPL_NETWORK` | App | No | `testnet` (default) or `devnet`. Mainnet is refused. Other `XRPL_*` variables are optional overrides with Testnet defaults (see the XRPL section of `.env.example`). |
-| `XAMAN_API_KEY`, `XAMAN_API_SECRET` | Wallet signing | **Yes** (the secret) | Needed once wallet sign-in and signing land (XRPL-011/014). |
+| `XAMAN_API_KEY`, `XAMAN_API_SECRET` | Wallet connect and transaction approval | **Yes** (the secret) | From the Xaman developer console. Without them, wallet features return "Wallet signing is not configured". |
+| `XRPL_TEST_TRANSACTIONS_ENABLED` | `/connect` | No | Shows a developer check that sends a no-op Testnet transaction through Xaman. On by default locally, **off by default in production**. |
 | `STORAGE_*`, `PUBLIC_ASSET_BASE_URL` | Ticket metadata and media | **Yes** (access keys) | Needed once metadata hosting and uploads land (XRPL-023, XRPL-070). |
 | `STRIPE_*`, `SPOTIFY_*`, `NOTIFICATION_PROVIDER_API_KEY` | Optional integrations | **Yes** | Leave blank unless an integration is explicitly enabled. |
 
@@ -105,7 +106,12 @@ Importing the repository installs Vercel's GitHub app on it, which needs admin r
    | `XRPL_NETWORK` | `testnet` | `testnet` |
    | `DEMO_LOGIN_ENABLED` | `true` only for the judges' demo | `true` |
    | `SEED_DEMO_DATA` | `true` only for the judges' demo | `true` |
+   | `XAMAN_API_KEY`, `XAMAN_API_SECRET` | The Xaman app's key and secret | The same values |
+   | `XRPL_TEST_TRANSACTIONS_ENABLED` | Leave unset (off) | `true` if testers should see the developer check |
    | `APP_BASE_URL` | The production `https` URL | Leave unset |
+
+   Wallet features need the Xaman keys on every deployment. The integration polls Xaman for results and
+   uses no webhooks or return URLs, so preview URLs don't need registering in the Xaman developer console.
 
    Previews need `SESSION_SECRET` too: Vercel runs previews in production mode, and the app refuses to start
    without it. A missing value fails the build with a message naming the variable.
