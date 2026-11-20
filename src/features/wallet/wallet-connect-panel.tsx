@@ -7,6 +7,8 @@ import type { WalletReadiness } from "@/contracts/events";
 import type { SignRequest } from "@/contracts/xrpl";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
 
+import { card, NETWORK_LABEL, primaryButton, secondaryButton } from "./styles";
+import { TestTransactionCheck } from "./test-transaction-check";
 import { useSignIn, type SignInState } from "./use-sign-in";
 import {
   clearConnectedWallet,
@@ -15,24 +17,25 @@ import {
   type ConnectedWallet,
 } from "./wallet-store";
 
-const NETWORK_LABEL = process.env.NEXT_PUBLIC_XRPL_NETWORK_LABEL ?? "XRPL Testnet";
 const NETWORK_NAMES: Record<string, string> = {
   MAINNET: "XRPL Mainnet",
   TESTNET: "XRPL Testnet",
   DEVNET: "XRPL Devnet",
 };
 
-const card = "rounded-card border border-border bg-surface-raised p-5";
-const primaryButton =
-  "inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButton =
-  "inline-flex items-center justify-center rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface";
-
 /**
  * Connect / disconnect an XRPL wallet through Xaman (XRPL-011). The user approves a
  * sign-in request in their own Xaman app; the app only ever sees the public address.
+ * `testTransactions` adds the developer approval check (XRPL-014); the page passes
+ * the server's setting.
  */
-export function WalletConnectPanel({ pollIntervalMs }: { pollIntervalMs?: number }) {
+export function WalletConnectPanel({
+  pollIntervalMs,
+  testTransactions = false,
+}: {
+  pollIntervalMs?: number;
+  testTransactions?: boolean;
+}) {
   const wallet = useConnectedWallet();
   const onConnected = useCallback((request: SignRequest & { account: string }) => {
     saveConnectedWallet({
@@ -47,6 +50,8 @@ export function WalletConnectPanel({ pollIntervalMs }: { pollIntervalMs?: number
     return (
       <ConnectedWalletCard
         wallet={wallet}
+        testTransactions={testTransactions}
+        pollIntervalMs={pollIntervalMs}
         onDisconnect={() => {
           clearConnectedWallet();
           reset();
@@ -165,9 +170,13 @@ function ConnectCard({
 
 function ConnectedWalletCard({
   wallet,
+  testTransactions,
+  pollIntervalMs,
   onDisconnect,
 }: {
   wallet: ConnectedWallet;
+  testTransactions: boolean;
+  pollIntervalMs?: number;
   onDisconnect: () => void;
 }) {
   return (
@@ -189,6 +198,9 @@ function ConnectedWalletCard({
       <p className="mt-3 text-xs text-muted">
         Disconnecting forgets this wallet in this browser. Your wallet and funds are not affected.
       </p>
+      {testTransactions ? (
+        <TestTransactionCheck key={wallet.address} address={wallet.address} pollIntervalMs={pollIntervalMs} />
+      ) : null}
     </section>
   );
 }

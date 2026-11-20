@@ -57,15 +57,27 @@ const PayloadResult = z.object({
   payload: z.object({
     tx_type: z.string(),
     expires_at: nullableString,
+    /** The transaction as the app requested it. */
+    request_json: z.record(z.string(), z.unknown()).optional(),
   }),
   response: z.object({
     account: nullableString,
+    /** Signed transaction blob (hex), once signed. */
     hex: nullableString,
     txid: nullableString,
     environment_nodetype: nullableString,
+    /** Preliminary engine result when Xaman submitted the transaction. */
     dispatched_result: nullableString,
     resolved_at: nullableString,
   }),
+  /** Metadata the app attached when creating the request. */
+  custom_meta: z
+    .object({
+      instruction: nullableString,
+      blob: z.unknown().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 export type XamanPayloadResult = z.infer<typeof PayloadResult>;
 

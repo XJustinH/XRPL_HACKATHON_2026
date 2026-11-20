@@ -266,3 +266,92 @@ export const SignRequest = z.object({
   networkMatches: z.boolean().nullable(),
 });
 export type SignRequest = z.infer<typeof SignRequest>;
+
+// ---------------------------------------------------------------------------
+// Transaction approval requests (XRPL-014)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the app asks the wallet to sign a transaction. Each purpose allows exactly one
+ * transaction type, built on the server by the issue that owns it (e.g. mint: XRPL-024).
+ * TEST is a no-op AccountSet for checking the approval flow during development.
+ */
+export const TransactionPurpose = z.enum(["TEST"]);
+export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
+
+/**
+ * Lifecycle of a transaction approval.
+ * - PENDING / OPENED: waiting for the user in Xaman.
+ * - REJECTED / EXPIRED / CANCELLED: never signed, so nothing was sent. Retry with a new request.
+ * - SUBMITTED: signed and sent to the network; waiting for a validated ledger.
+ * - CONFIRMED: validated with tesSUCCESS. The only success state.
+ * - FAILED: see `failureReason`.
+ */
+export const TransactionRequestStatus = z.enum([
+  "PENDING",
+  "OPENED",
+  "REJECTED",
+  "EXPIRED",
+  "CANCELLED",
+  "SUBMITTED",
+  "CONFIRMED",
+  "FAILED",
+]);
+export type TransactionRequestStatus = z.infer<typeof TransactionRequestStatus>;
+
+/** Statuses that will not change any more. */
+export const FINAL_TRANSACTION_REQUEST_STATUSES: readonly TransactionRequestStatus[] = [
+  "REJECTED",
+  "EXPIRED",
+  "CANCELLED",
+  "CONFIRMED",
+  "FAILED",
+];
+
+/**
+ * Why a signed transaction FAILED.
+ * - LEDGER_REJECTED: validated with a "tec" result. The fee was charged; nothing else changed.
+ * - NETWORK_REJECTED: refused before reaching a ledger ("tem" or "tef" results). Nothing was charged.
+ * - NOT_VALIDATED_IN_TIME: its LastLedgerSequence passed without validation. Nothing was charged.
+ * - WRONG_NETWORK: the wallet signed on a different network than the app uses.
+ */
+export const TransactionFailureReason = z.enum([
+  "LEDGER_REJECTED",
+  "NETWORK_REJECTED",
+  "NOT_VALIDATED_IN_TIME",
+  "WRONG_NETWORK",
+]);
+export type TransactionFailureReason = z.infer<typeof TransactionFailureReason>;
+
+export const TransactionRequest = z.object({
+  /** The wallet provider's request ID (Xaman payload UUID). */
+  id: z.uuid(),
+  purpose: TransactionPurpose,
+  /** App record the request is for (e.g. a ticket ID), if any. */
+  reference: z.string().nullable(),
+  status: TransactionRequestStatus,
+  transactionType: z.string(),
+  /** Account that must sign. */
+  account: XrplAddress,
+  /** What the user is asked to approve, as shown in Xaman. */
+  instruction: z.string(),
+  signUrl: z.url(),
+  qrPngUrl: z.url(),
+  expiresAt: IsoDateTime.nullable(),
+  /** Set once signed. */
+  txHash: TxHash.nullable(),
+  /** Ledger result once validated, or the network's refusal code. */
+  engineResult: z.string().nullable(),
+  ledgerIndex: z.number().int().nullable(),
+  /** Explorer link for transactions that reached a validated ledger. */
+  explorerUrl: z.string().nullable(),
+  failureReason: TransactionFailureReason.nullable(),
+});
+export type TransactionRequest = z.infer<typeof TransactionRequest>;
+
+/** Body of `POST /api/wallet/transaction-requests` (development only). */
+export const CreateTestTransactionBody = z.object({
+  purpose: z.literal("TEST"),
+  account: XrplAddress,
+});
+export type CreateTestTransactionBody = z.infer<typeof CreateTestTransactionBody>;

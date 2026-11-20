@@ -22,10 +22,11 @@ Docs:
 | `wallet/xaman.ts` | Xaman platform API client (server-only, uses the API secret) | XRPL-011 |
 | `wallet/sign-requests.ts` | Sign-in requests: create, status, cancel, `getSignedSignIn` for XRPL-012 | XRPL-011 |
 | `wallet/readiness.ts` | Spendable balance and blockers for a wallet (`WalletReadiness`) | XRPL-011 |
+| `wallet/transaction-requests.ts` | Transaction approvals: create per purpose, follow Xaman then the ledger to CONFIRMED/FAILED | XRPL-014 |
+| `wallet/test-transactions.ts` | Developer no-op test transaction switch (`XRPL_TEST_TRANSACTIONS_ENABLED`) | XRPL-014 |
 | `tools/` | Developer CLIs run via `npm run xrpl:*`. Never imported by the app | XRPL-006/007 |
 
 Routes owned here: `src/app/api/xrpl/**` (status, wallet NFTs, transaction status) and
-`src/app/api/wallet/**` (sign requests, readiness). The browser side lives in `src/features/wallet/`.
+`src/app/api/wallet/**` (sign requests, transaction requests, readiness). The browser side lives in `src/features/wallet/`.
 
-Next: transaction sign requests (XRPL-014), then `createMintIntent`, `createSellOfferIntent`,
-`acceptOfferIntent` and `cancelOfferIntent`.
+Next: NFT metadata and minting (XRPL-022/023/024), which add the first real transaction purpose.
