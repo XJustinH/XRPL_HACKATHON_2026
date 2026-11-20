@@ -242,7 +242,9 @@ These are **proposed application routes, not third-party APIs that already exist
 | POST | `/api/auth/logout` | End session and revoke app-side link if requested | 010, 012 |
 | GET | `/api/me` | Authenticated profile, role, linked wallet | 010 |
 | PATCH | `/api/me` | Update permitted account preferences (not arbitrary role escalation) | 010 |
-| POST | `/api/onboarding` | Pick customer or approved seller/demo organiser flow | 010, 013 |
+| POST | `/api/onboarding` | Pick customer or seller (self-service, once); organiser is never self-service | 010, 013 |
+| GET | `/api/auth/demo-personas` | Seeded demo accounts usable without a wallet (`DEMO_LOGIN_ENABLED`) | 010 |
+| POST | `/api/auth/demo-session` | Sign in as a demo persona; 404 for real accounts or when disabled | 010 |
 | GET | `/api/events/:id/availability` | Calculated primary remaining/sold-out status | 020 |
 | GET | `/api/events/:id/inventory` | Seller-only minted, listed, sold, remaining totals | 020, 021 |
 | POST | `/api/ledger/transactions/:hash/reconcile` | Authenticated/internal: validate ledger tx and idempotently apply its effects | 032, 043 |

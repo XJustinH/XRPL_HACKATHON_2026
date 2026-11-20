@@ -36,6 +36,10 @@ Check readiness: `curl http://localhost:3000/api/health` returns
 `{"data":{"status":"ok","checks":{"database":"ok"},"xrplNetwork":"testnet",...}}`, or a 503
 `SERVICE_UNAVAILABLE` error when the database is down.
 
+Try onboarding at <http://localhost:3000/onboarding>: create a customer or seller profile, or continue as a
+seeded demo account. Sellers see **Manage events** in the navigation and customers don't. Wallet sign-in
+comes later (XRPL-012); until then profiles are not linked to a wallet and cannot sign transactions.
+
 ### Scripts
 
 | Command | What it does |
@@ -44,7 +48,7 @@ Check readiness: `curl http://localhost:3000/api/health` returns
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm test` | Unit tests (no database needed) |
-| `npm run test:db` | Schema integration tests against `TEST_DATABASE_URL` (must be a separate `*_test` DB) |
+| `npm run test:db` | Database integration tests (schema, auth/onboarding) against `TEST_DATABASE_URL` (must be a separate `*_test` DB) |
 | `npm run db:up` / `db:down` | Start / stop local Postgres |
 | `npm run db:migrate` | Create/apply migrations in development (`prisma migrate dev`) |
 | `npm run db:deploy` | Apply committed migrations only (deployed environments, CI) |
@@ -58,6 +62,9 @@ Check readiness: `curl http://localhost:3000/api/health` returns
   Run `npm run db:deploy` (never `migrate dev`) against deployed databases.
   `SESSION_SECRET` (≥ 32 chars) is mandatory when `NODE_ENV=production`.
 - `XRPL_NETWORK` accepts only `testnet` or `devnet`. Mainnet is refused at startup.
+- `DEMO_LOGIN_ENABLED` lets visitors use seeded demo accounts without a wallet. It defaults to on locally and
+  **off in production**, so set it to `true` explicitly for a judges' demo deployment.
+- Set `APP_BASE_URL` to the public https URL when deployed. Session cookies are `Secure` only on https.
 
 ### Windows note
 
@@ -65,6 +72,15 @@ Run commands from a shell whose working directory uses an **upper-case drive let
 (`C:\Users\...`, not `c:\Users\...`). With a lower-case drive letter Vitest loads its runner twice and every
 suite fails with `Cannot read properties of undefined (reading 'config')`. Some VS Code terminals open
 with a lower-case drive letter, and running `cd C:\path\to\repo` first fixes it.
+
+### NixOS note
+
+`prisma generate` (run by `npm install`) can fail on NixOS because there is no prebuilt engine for the
+`linux-nixos` platform. A teammate reported this workaround:
+
+```bash
+PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 PRISMA_CLI_BINARY_TARGETS=debian-openssl-3.0.x npx prisma generate
+```
 
 ## Project structure
 

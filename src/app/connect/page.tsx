@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { NotImplementedNotice } from "@/components/ui/empty-state";
 
@@ -14,6 +15,20 @@ export default function ConnectPage() {
         title="Wallet connect and session linking"
         blockedBy="XRPL-011 (wallet connect) and XRPL-012 (proving wallet control and linking it to a session)"
       />
+      <section className="mt-6 flex flex-col gap-3 rounded-card border border-border bg-surface p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">No wallet yet?</h2>
+          <p className="mt-1 text-sm text-muted">
+            Create a customer or seller profile, or use a demo account, to explore the app now.
+          </p>
+        </div>
+        <Link
+          href="/onboarding"
+          className="shrink-0 rounded-lg bg-accent px-4 py-2 text-center text-sm font-semibold text-accent-ink hover:opacity-90"
+        >
+          Get started
+        </Link>
+      </section>
       <section className="mt-6 rounded-card border border-border bg-surface-raised p-5 text-sm text-muted">
         <h2 className="text-sm font-semibold text-ink">What to expect</h2>
         <ol className="mt-3 list-decimal space-y-2 pl-5">
