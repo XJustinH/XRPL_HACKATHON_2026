@@ -190,10 +190,10 @@ describe('XRPL-046 ledger validation at entry', () => {
     expect(await env.svc.admit(scan(env, c.qrPayload))).toMatchObject({ status: 'WRONG_OWNER' });
   });
 
-  it('rejects an NFT no longer on the ledger', async () => {
+  it('rejects an NFT no longer on the ledger (e.g. burned)', async () => {
     const c = await issueAndProve(env);
     env.ledger.owners.delete(NFT);
-    expect(await env.svc.verifyScan(scan(env, c.qrPayload))).toMatchObject({ status: 'UNKNOWN_TICKET' });
+    expect(await env.svc.verifyScan(scan(env, c.qrPayload))).toMatchObject({ status: 'WRONG_OWNER' });
   });
 
   it('never admits when the ledger is unavailable', async () => {

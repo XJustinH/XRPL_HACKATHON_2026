@@ -2,7 +2,7 @@
  * Interfaces the check-in core depends on.
  *  - CheckInStore, TicketDirectory: Prisma implementations in ./prisma-store.ts (schema XRPL-005)
  *  - OrganiserAccess: Agent A roles (XRPL-013)
- *  - LedgerOwnership: Agent B `getOwner` from a validated ledger (XRPL-028)
+ *  - LedgerOwnership: Agent B `verifyOwner` from a validated ledger (XRPL-007/028), see ./xrpl-ownership.ts
  *  - WalletProofVerifier: Agent A/B wallet-control proof (XRPL-012, e.g. Xaman SignIn)
  * In-memory fakes for tests live in ./testing/fakes.ts.
  */
@@ -23,7 +23,8 @@ export interface OrganiserAccess {
   canScanEvent(organiserId: string, eventId: string): Promise<boolean>;
 }
 
-export type LedgerOwner = { ownerAddress: XrplAddress; ledgerIndex: number };
+/** Result of checking one wallet against one NFT on a validated ledger. */
+export type OwnershipCheck = { owns: boolean; ledgerIndex: number | null };
 
 /** Thrown by LedgerOwnership when XRPL cannot be queried. Never treated as success. */
 export class LedgerUnavailableError extends Error {
@@ -34,8 +35,11 @@ export class LedgerUnavailableError extends Error {
 }
 
 export interface LedgerOwnership {
-  /** Owner per a validated ledger; null if the token does not exist. Throws LedgerUnavailableError. */
-  getOwner(nftokenId: NFTokenId): Promise<LedgerOwner | null>;
+  /**
+   * Whether `address` holds `nftokenId` in the latest validated ledger.
+   * Throws LedgerUnavailableError on any failure; never guesses.
+   */
+  checkOwner(nftokenId: NFTokenId, address: XrplAddress): Promise<OwnershipCheck>;
 }
 
 export interface WalletProofVerifier {
@@ -61,7 +65,7 @@ export type NewCheckInRecord = {
   challengeId: string;
   organiserId: string;
   walletAddress: XrplAddress;
-  verifiedLedgerIndex: number;
+  verifiedLedgerIndex: number | null;
   scannedAt: Date;
 };
 

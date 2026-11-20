@@ -43,7 +43,7 @@ export type CheckInChallengeIssued = {
 
 export const CHECKIN_FAILURE_STATUSES = [
   "INVALID_QR", // malformed or tampered QR payload
-  "UNKNOWN_TICKET", // challenge, ticket or NFT does not exist
+  "UNKNOWN_TICKET", // challenge or ticket does not exist, or ticket not minted
   "NOT_AUTHORISED", // scanner is not an organiser for this event
   "WRONG_EVENT", // ticket/challenge belongs to a different event
   "EXPIRED", // challenge past its expiry
@@ -66,12 +66,13 @@ export type CheckInVerification =
       eventId: string;
       nftokenId: NFTokenId;
       ownerAddress: XrplAddress;
-      ledgerIndex: number;
+      /** Validated ledger the ownership was read from (null if the node did not report one). */
+      ledgerIndex: number | null;
     }
   | CheckInFailure;
 
 export type CheckInResult =
-  | { status: "ADMITTED"; ticketId: string; eventId: string; checkedInAt: IsoDateTime; ledgerIndex: number }
+  | { status: "ADMITTED"; ticketId: string; eventId: string; checkedInAt: IsoDateTime; ledgerIndex: number | null }
   | CheckInFailure;
 
 /** HTTP status for each failure; failures are returned as `{ error: { code: status } }`. */

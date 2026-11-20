@@ -4,7 +4,6 @@ import {
   type AdmitOutcome,
   type CheckInStore,
   type Clock,
-  type LedgerOwner,
   type LedgerOwnership,
   type NewCheckInRecord,
   type OrganiserAccess,
@@ -49,10 +48,9 @@ export class FakeLedger implements LedgerOwnership {
   readonly owners = new Map<NFTokenId, XrplAddress>();
   ledgerIndex = 1000;
   down = false;
-  async getOwner(id: NFTokenId): Promise<LedgerOwner | null> {
+  async checkOwner(id: NFTokenId, address: XrplAddress) {
     if (this.down) throw new LedgerUnavailableError();
-    const owner = this.owners.get(id);
-    return owner ? { ownerAddress: owner, ledgerIndex: this.ledgerIndex } : null;
+    return { owns: this.owners.get(id) === address, ledgerIndex: this.ledgerIndex };
   }
 }
 
