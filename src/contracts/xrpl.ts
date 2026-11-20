@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, pageOf, TxHash, XrplAddress } from "./common";
-import { XrplNetwork } from "./entities";
+import { TicketDto, TicketTierDto, XrplNetwork } from "./entities";
 
 /**
  * XRPL contract types. Owner: Agent B.
@@ -276,7 +276,7 @@ export type SignRequest = z.infer<typeof SignRequest>;
  * transaction type, built on the server by the issue that owns it (e.g. mint: XRPL-024).
  * TEST is a no-op AccountSet for checking the approval flow during development.
  */
-export const TransactionPurpose = z.enum(["TEST"]);
+export const TransactionPurpose = z.enum(["TEST", "MINT_TICKET"]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
 /**
@@ -399,3 +399,38 @@ export const TicketNftMetadata = z.object({
   tier: z.object({ name: z.string(), priceDrops: Drops }),
 });
 export type TicketNftMetadata = z.infer<typeof TicketNftMetadata>;
+
+// ---------------------------------------------------------------------------
+// Ticket minting (XRPL-024)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of `POST /api/events/:id/mints`: mint the next ticket of a tier. The issuer is the
+ * session's proven wallet (XRPL-012), so the browser never names it.
+ */
+export const CreateMintBody = z.object({ tierId: AppId });
+export type CreateMintBody = z.infer<typeof CreateMintBody>;
+
+/** A ticket record plus explorer links once its NFT exists. */
+export const MintTicketView = TicketDto.extend({
+  nftExplorerUrl: z.string().nullable(),
+  mintTxExplorerUrl: z.string().nullable(),
+});
+export type MintTicketView = z.infer<typeof MintTicketView>;
+
+/** Response of `POST /api/events/:id/mints`. Render `request` with the approval UI. */
+export const MintRequestResult = z.object({
+  ticket: MintTicketView,
+  request: TransactionRequest,
+  /** False when the metadata URI is not reachable from the internet (e.g. localhost). */
+  metadataPublic: z.boolean(),
+});
+export type MintRequestResult = z.infer<typeof MintRequestResult>;
+
+/** Response of `GET /api/events/:id/mints`: every tier with its ticket records. */
+export const EventMints = z.object({
+  eventId: AppId,
+  title: z.string(),
+  tiers: z.array(TicketTierDto.extend({ tickets: z.array(MintTicketView) })),
+});
+export type EventMints = z.infer<typeof EventMints>;

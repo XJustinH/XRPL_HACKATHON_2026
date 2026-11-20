@@ -1,4 +1,4 @@
-# Ticket NFTs: metadata and identity (Agent B, XRPL-022)
+# Ticket NFTs: metadata, publishing and minting (Agent B, XRPL-022 to XRPL-024)
 
 Each admission ticket is one XRPL NFT, minted by the seller's own wallet. This page defines what the
 NFT carries and how it maps to the app's records. Code: `src/lib/xrpl/tickets/metadata.ts`. Contract:
@@ -20,7 +20,7 @@ NFT carries and how it maps to the app's records. Code: `src/lib/xrpl/tickets/me
 |---|---|---|
 | `Flags` | `tfTransferable` only | Holders can resell or gift (XRPL-036/040/041). Not `tfBurnable`, so the issuer cannot destroy a ticket someone else holds |
 | `TransferFee` | none (0) | Royalties are a separate P2 spike (XRPL-094) |
-| `NFTokenTaxon` | `ticketTaxon(eventId)`: the first 32 bits of the event UUID | Groups an issuer's tickets per event; stable and needs no storage |
+| `NFTokenTaxon` | `ticketTaxon(eventId)`: the first 32 bits of the event UUID | Groups an issuer's tickets per event; stable and needs no storage. Only a grouping hint: identity comes from the URI and the app's mapping, so two events sharing a taxon (the seed data's fixed IDs all start `5eed0000`) is harmless |
 | `URI` | Hex of the ticket's metadata URL (≤ 256 bytes) | Points to the JSON below (XRPL-023) |
 
 ## Metadata JSON
@@ -77,3 +77,66 @@ Served publicly at the ticket's URI. It follows the XLS-24 layout so wallets and
 - **Limitation:** the JSON is rendered from the current event and tier records. If a seller edits an
   event after minting, the served metadata follows the edit. Freezing it would need either a stored
   snapshot (a schema request to Agent A) or content-addressed storage (IPFS/S3), as a follow-up.
+
+## Minting a ticket (XRPL-024)
+
+The seller mints one ticket at a time from **Manage events** (`/seller/events`), signing each
+`NFTokenMint` in their own Xaman wallet. The app never holds a seller key. Code:
+`src/lib/xrpl/tickets/minting.ts`, `src/app/api/events/[id]/mints/route.ts`, UI in `src/features/minting/`.
+
+1. **Request.** `POST /api/events/:id/mints` with `{ tierId }` and an `Idempotency-Key` header. Only the
+   event's owner may mint (Agent A's `requireEventOwner`: 401 / 404 / 403 `NOT_EVENT_OWNER`), and only
+   with the wallet this session has proven through Xaman sign-in (XRPL-012, `requireProvenWallet`: 403
+   `WALLET_NOT_VERIFIED`). That proven wallet is the issuer; the browser never names it. The server
+   reserves the next ticket (`PENDING`, metadata URI fixed; 409 when the tier is full) and builds the
+   transaction itself: `Account` = the proven wallet, the event's taxon, `tfTransferable`, the ticket's
+   URI and a memo (`xrpl-ticketing/ticket`) carrying the ticket ID. It is sent to Xaman as a `MINT_TICKET`
+   request, which may only be an `NFTokenMint`. A `PENDING` `LedgerTransaction` links the ticket to the
+   request. Response: the ticket, the request (QR code and link) and `metadataPublic`.
+2. **Approve.** The seller checks and approves in Xaman. `TransactionApproval` follows the request:
+   submitted, then confirmed with an explorer link.
+3. **Reconcile.** `GET /api/events/:id/mints` brings every mint in flight up to date (up to 20 per call)
+   and returns the event's tiers and tickets. The panel reloads it when the approval finishes, so a page
+   refresh shows the same result.
+
+How a mint is recorded (`reconcileTicketMint`):
+
+| Request outcome | Ticket | `LedgerTransaction` | Tier `mintedQuantity` |
+|---|---|---|---|
+| Validated `tesSUCCESS` `NFTokenMint` (re-checked with `getValidatedTx`) | `MINTED` with `nftokenId`, `mintTxHash`, `mintedAt` (ledger close time), issuer = the transaction's `Account` | `VALIDATED_SUCCESS`, `appliedAt` set | +1, once |
+| Signed and submitted, not yet validated | `SUBMITTED` | hash recorded | unchanged |
+| Rejected by the ledger (`tec…`, fee charged) | `FAILED` | `VALIDATED_FAILURE` | unchanged |
+| Declined, expired, cancelled, or never validated | `FAILED` | `DROPPED` | unchanged |
+| Xaman unreachable | unchanged; retried on the next read | unchanged | unchanged |
+
+- **No false mints.** A ticket becomes `MINTED` only from the validated transaction, and only if the
+  NFTokenID's issuer and taxon match the ticket's event. While the issuer still holds the NFT, its URI
+  must also be the ticket's metadata URI. Anything else is refused and logged, and the ticket is not
+  changed.
+- **Exactly once.** Effects are applied in one database transaction that first claims the
+  `LedgerTransaction` (`appliedAt`). Repeated or concurrent reconciles never count a mint twice, and a
+  late answer never moves a ticket back to an earlier status.
+- **Failed mints are reusable.** A `FAILED` ticket never got an NFT, so the next mint in that tier reuses
+  its serial and URI.
+- **Idempotency.** A repeated `Idempotency-Key` replays the first response (`Idempotent-Replayed: true`)
+  instead of reserving another ticket. The same key with a different body gets 422
+  `IDEMPOTENCY_KEY_REUSED`, and 409 while the first request is still running. Keys last 24 hours and
+  are scoped per user (`src/lib/xrpl/idempotency.ts`, on Agent A's `IdempotencyRecord`). The panel
+  reuses the key only when a request got no response.
+
+Verified on XRPL Testnet (20 Nov 2026), with the server-built transaction signed by a dev seller wallet and
+recorded by the reconciler from the validated ledger:
+[`FDA1B6E6…68847014`](https://testnet.xrpl.org/transactions/FDA1B6E60466B33558E246E9C4EB697B39D62FB39C908E8CD2B0A13168847014)
+(`tesSUCCESS`, ledger 22480936) minted NFT
+[`000800007AEF…0156FB28`](https://testnet.xrpl.org/nft/000800007AEF3497563B53E5B5C1C3BF3278E4831BD6183441C7ACC30156FB28)
+(transferable, the event's taxon, the ticket's metadata URI).
+
+Limitations:
+
+- One ticket per approval. Minting a tier's whole quantity is XRPL-025 (needs XRPL-016 from Agent C).
+  Retrying failed mints and background reconciliation are XRPL-027 and XRPL-026.
+- An unapproved request holds its serial until the Xaman request expires (10 minutes). The next read
+  then releases it.
+- A demo persona must prove its wallet again in each session (Agent A's rule for shared demo accounts).
+- Locally the metadata URI is `localhost`, so Xaman and the explorer cannot show the ticket's details
+  (the panel warns when `metadataPublic` is false). The mint itself is valid.

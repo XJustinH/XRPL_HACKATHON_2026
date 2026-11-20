@@ -9,7 +9,7 @@ Browser side of wallet connection and transaction approvals (XRPL-011, XRPL-014)
 | `wallet-store.ts` | Connected wallet (public address + network) kept in this browser |
 | `use-sign-in.ts` | One Xaman sign-in: create, poll, cancel |
 | `wallet-connect-panel.tsx` | Connect / connected / disconnect UI, used by `/connect` |
-| `transaction-approval.tsx` | Approve-in-Xaman, submitted, confirmed (explorer link) and failed states for any transaction request (XRPL-014) |
+| `transaction-approval.tsx` | Approve-in-Xaman, submitted, confirmed (explorer link) and failed states for any transaction request (XRPL-014). `onFinished` fires once with the final request so the screen can refresh |
 | `test-transaction-check.tsx` | Developer no-op transaction check, shown when the server enables it |
 | `styles.ts` | Shared class names on Agent C's design tokens |
 

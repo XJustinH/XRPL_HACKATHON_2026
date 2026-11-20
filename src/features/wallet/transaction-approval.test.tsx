@@ -95,6 +95,19 @@ describe("TransactionApproval", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
+  it("reports the final request once, so the screen can refresh", async () => {
+    mockApi([txRequest("SUBMITTED", { txHash: TX_HASH }), CONFIRMED]);
+    const onFinished = vi.fn();
+    render(<TransactionApproval request={txRequest("PENDING")} onFinished={onFinished} pollIntervalMs={5} />);
+
+    await screen.findByText("Confirmed on XRPL Testnet.");
+    await new Promise((resolve) => setTimeout(resolve, 30)); // a few more poll intervals
+    expect(onFinished).toHaveBeenCalledOnce();
+    expect(onFinished).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "CONFIRMED", txHash: TX_HASH }),
+    );
+  });
+
   it("explains a ledger rejection, links it and offers a retry", async () => {
     mockApi([
       txRequest("FAILED", {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   FINAL_TRANSACTION_REQUEST_STATUSES,
@@ -122,20 +122,33 @@ function outcomeOf(request: TransactionRequest): { tone: "caution" | "critical";
  * Approval and status for one wallet transaction (XRPL-014): approve in Xaman, then
  * submitted, then confirmed on a validated ledger with an explorer link. Failed, declined,
  * expired and cancelled requests explain what happened and offer `onRetry`.
- * Mint, offer and purchase screens render this with the request their route returns.
+ * Mint, offer and purchase screens render this with the request their route returns, and
+ * use `onFinished` (called once, with the final request) to refresh their own state.
  */
 export function TransactionApproval({
   request: initial,
   title = "Approve in Xaman",
   onRetry,
+  onFinished,
   pollIntervalMs,
 }: {
   request: TransactionRequest;
   title?: string;
   onRetry?: () => void;
+  onFinished?: (request: TransactionRequest) => void;
   pollIntervalMs?: number;
 }) {
   const { request, lostContact, cancel } = useTransactionRequest(initial, pollIntervalMs);
+  const onFinishedRef = useRef(onFinished);
+  const finishedId = useRef<string | null>(null);
+  useEffect(() => {
+    onFinishedRef.current = onFinished;
+  }, [onFinished]);
+  useEffect(() => {
+    if (!isFinal(request.status) || finishedId.current === request.id) return;
+    finishedId.current = request.id;
+    onFinishedRef.current?.(request);
+  }, [request]);
   const current = stepOf(request.status);
   const outcome = outcomeOf(request);
   const waitingForWallet = request.status === "PENDING" || request.status === "OPENED";
