@@ -10,6 +10,8 @@ import { isEventOwner } from "@/lib/auth/permissions";
 import { getEventView } from "@/features/events/event-store";
 import { formatEventDate } from "@/features/events/event-formatting";
 import { TierManager } from "@/features/events/tier-manager";
+import { PublishPanel } from "@/features/events/publish-panel";
+import { EventDetailsForm } from "@/features/events/event-details-form";
 
 export const metadata = { title: "Event setup" };
 
@@ -75,18 +77,11 @@ export default async function SellerEventPage({
         }
       />
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <Badge tone={event.status === "PUBLISHED" ? "positive" : "neutral"}>
-          {event.status === "PUBLISHED" ? "Published" : "Draft"}
-        </Badge>
-        {event.status === "DRAFT" ? (
-          <span className="text-sm text-muted">
-            Not visible to buyers yet. Publishing arrives with XRPL-017.
-          </span>
-        ) : null}
+      <div className="flex flex-col gap-8">
+        <PublishPanel event={event} />
+        <TierManager event={event} />
+        <EventDetailsForm event={event} />
       </div>
-
-      <TierManager event={event} />
 
       <p className="mt-8 text-sm text-muted">
         Setting a price and quantity reserves nothing on the ledger. Tickets become NFTs

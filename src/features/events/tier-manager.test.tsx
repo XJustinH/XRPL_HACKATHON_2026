@@ -5,10 +5,10 @@ import type { EventView, TicketTierView } from "@/contracts";
 import { TierManager, draftToTierInput } from "./tier-manager";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-const postJson = vi.hoisted(() => vi.fn());
+const requestJson = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
-vi.mock("@/features/onboarding/post-json", () => ({ postJson }));
+vi.mock("./api-client", () => ({ requestJson }));
 
 function tier(overrides: Partial<TicketTierView> = {}): TicketTierView {
   return {
@@ -94,7 +94,7 @@ describe("draftToTierInput", () => {
 describe("TierManager", () => {
   beforeEach(() => {
     router.refresh.mockReset();
-    postJson.mockReset();
+    requestJson.mockReset();
   });
 
   it("prompts for a first tier when the event has none", () => {
@@ -103,7 +103,7 @@ describe("TierManager", () => {
   });
 
   it("adds a tier, sending XRP converted to drops", async () => {
-    postJson.mockResolvedValue({ ok: true, data: event([tier()]) });
+    requestJson.mockResolvedValue({ ok: true, data: event([tier()]) });
     const user = userEvent.setup();
     render(<TierManager event={event([])} />);
 
@@ -112,10 +112,11 @@ describe("TierManager", () => {
     await user.type(screen.getByLabelText(/Quantity/), "100");
     await user.click(screen.getByRole("button", { name: "Add tier" }));
 
-    expect(postJson).toHaveBeenCalledTimes(1);
-    const [url, body] = postJson.mock.calls[0]!;
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    const [url, init] = requestJson.mock.calls[0]!;
     expect(url).toBe("/api/events/evt-1/tiers");
-    expect(body).toMatchObject({
+    expect(init.method).toBe("POST");
+    expect(init.body).toMatchObject({
       name: "General admission",
       priceDrops: "25000000",
       totalSupply: 100,
@@ -131,13 +132,13 @@ describe("TierManager", () => {
     await user.type(screen.getByLabelText(/Quantity/), "abc");
     await user.click(screen.getByRole("button", { name: "Add tier" }));
 
-    expect(postJson).not.toHaveBeenCalled();
+    expect(requestJson).not.toHaveBeenCalled();
     expect(screen.getByText("Price cannot be negative")).toBeVisible();
     expect(screen.getByText("Enter a whole number of tickets")).toBeVisible();
   });
 
   it("shows a duplicate-name conflict from the server and keeps the input", async () => {
-    postJson.mockResolvedValue({
+    requestJson.mockResolvedValue({
       ok: false,
       code: "DUPLICATE_TIER_NAME",
       message: 'This event already has a tier called "GA"',
