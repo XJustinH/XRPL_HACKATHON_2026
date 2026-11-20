@@ -8,6 +8,9 @@ npm run db:up          # Postgres, if it isn't running
 npm run test:testnet   # about 30 seconds; needs the internet
 ```
 
+To run it without a local setup, use GitHub: **Actions → Testnet lifecycle → Run workflow**
+(`.github/workflows/testnet.yml`).
+
 It is **not part of CI or `npm test`**: it depends on the public Testnet and its faucet, which can be slow
 or down. Run it before merging ledger changes and before the demo rehearsal. It uses the same `*_test`
 database as `npm run test:db` and wipes it, so don't run the two at the same time.
