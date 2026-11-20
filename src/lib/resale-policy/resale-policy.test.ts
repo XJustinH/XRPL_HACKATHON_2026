@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { RESALE_LIMITATION_NOTICE } from "@/contracts/checkin";
 import type { EventAvailability, ResaleListing } from "@/contracts/events";
 import { FakeClock } from "@/features/checkin/testing/fakes";
-import { type PolicyEvent, ResalePolicy } from "./resale-policy";
+import { type PolicyEvent, type ResaleGuardrails, ResalePolicy, maxResalePriceDrops } from "./resale-policy";
 
 const EVENT = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -120,5 +120,76 @@ describe("XRPL-037 in-app resale policy", () => {
     inventoryDown = true;
     await expect(policy.listPublicOffers(EVENT)).rejects.toThrow();
     await expect(policy.getPublicOffer(EVENT, "o1")).rejects.toThrow();
+  });
+});
+
+describe("XRPL-095 optional resale price guardrails", () => {
+  // Face value 20 XRP (listing() default), event sold out and published.
+  const soldOut: EventAvailability = {
+    eventId: EVENT,
+    totalSupply: 1,
+    sold: 1,
+    remaining: 0,
+    isSoldOut: true,
+    fromPriceDrops: null,
+    calculatedAt: "2026-12-01T11:59:00.000Z",
+  };
+  const make = (guardrails: ResaleGuardrails | undefined, offers: ResaleListing[]) =>
+    new ResalePolicy({
+      clock: new FakeClock(new Date("2026-12-01T12:00:00Z").getTime()),
+      events: { getEvent: async () => ({ id: EVENT, status: "PUBLISHED", startsAt: "2026-12-05T20:00:00.000Z" }) },
+      inventory: { getAvailability: async () => soldOut },
+      offers: { listResaleOffers: async () => offers },
+      guardrails,
+    });
+  const atFace = listing({ offerId: "face", amountDrops: "20000000" });
+  const at10 = listing({ offerId: "plus10", amountDrops: "22000000" });
+  const over10 = listing({ offerId: "plus10.000001", amountDrops: "22000001" });
+  const double = listing({ offerId: "double", amountDrops: "40000000" });
+  const all = [atFace, at10, over10, double];
+
+  it("is off by default: every valid listing is shown and there is no notice", async () => {
+    const policy = make(undefined, all);
+    expect((await policy.listPublicOffers(EVENT)).offers).toHaveLength(4);
+    expect(policy.priceCapNotice()).toBeNull();
+    expect(policy.checkResalePrice("20000000", "999000000")).toEqual({ allowed: true, maxDrops: null });
+  });
+
+  it("hides listings above the cap, to the exact drop", async () => {
+    const policy = make({ maxMarkupPercent: 10 }, all);
+    expect((await policy.listPublicOffers(EVENT)).offers.map((o) => o.offerId)).toEqual(["face", "plus10"]);
+  });
+
+  it("blocks a direct lookup or buy of an over-cap listing", async () => {
+    const policy = make({ maxMarkupPercent: 10 }, all);
+    expect(await policy.getPublicOffer(EVENT, "double")).toBeNull();
+    expect(await policy.getPublicOffer(EVENT, "plus10")).toMatchObject({ offerId: "plus10" });
+  });
+
+  it("checks a price before listing and says why", () => {
+    const policy = make({ maxMarkupPercent: 10 }, []);
+    expect(policy.checkResalePrice("20000000", "22000000")).toEqual({ allowed: true, maxDrops: "22000000" });
+    const refused = policy.checkResalePrice("20000000", "22000001");
+    expect(refused).toMatchObject({ allowed: false, maxDrops: "22000000" });
+    expect(refused.allowed === false && refused.message).toMatch(/10% above face value.*outside the app/);
+  });
+
+  it("a 0% cap means face value or less", async () => {
+    const policy = make({ maxMarkupPercent: 0 }, all);
+    expect((await policy.listPublicOffers(EVENT)).offers.map((o) => o.offerId)).toEqual(["face"]);
+    expect(policy.priceCapNotice()).toMatch(/above face value\./);
+  });
+
+  it("rejects invalid configuration", () => {
+    for (const bad of [-1, 1001, 2.5, Number.NaN]) {
+      expect(() => make({ maxMarkupPercent: bad }, [])).toThrow();
+    }
+  });
+
+  it("computes the cap in exact integer drops", () => {
+    expect(maxResalePriceDrops("20000000", 10)).toBe("22000000");
+    expect(maxResalePriceDrops("3", 50)).toBe("4"); // 4.5 rounds down
+    expect(maxResalePriceDrops("0", 100)).toBe("0");
+    expect(maxResalePriceDrops("99999999999999999", 1000)).toBe("1099999999999999989");
   });
 });

@@ -6,6 +6,8 @@
  * transferable, so it cannot stop sales or transfers made directly on XRPL; the UI must show
  * RESALE_LIMITATION_NOTICE.
  *
+ * Optional price guardrails (XRPL-095, off by default) also hide listings priced too far above face value.
+ *
  * Every public resale read (list, single offer, buy intent) must go through `listPublicOffers`
  * or `getPublicOffer`, so a direct API call cannot reach a hidden listing. If inventory or
  * offers cannot be read, the error propagates (route returns 503): nothing is listed.
@@ -20,12 +22,27 @@ import type { InventoryPort, OfferPort, ResalePolicyPort } from "@/features/inte
 /** The event fields the rule needs; `EventView` satisfies this. */
 export type PolicyEvent = { id: string; status: EventStatus; startsAt: string; endsAt?: string | null };
 
+/**
+ * Optional, platform-only price guardrails (XRPL-095). Off unless configured. They only decide what
+ * this app lists; they cannot stop a sale on another marketplace or a wallet-to-wallet transfer.
+ * See docs/resale-guardrails.md.
+ */
+export type ResaleGuardrails = {
+  /** Hide public resale listings priced above face value + this percentage (integer, 0..1000). */
+  maxMarkupPercent?: number;
+};
+
 export type ResalePolicyDeps = {
   events: { getEvent(eventId: string): Promise<PolicyEvent | null> };
   inventory: Pick<InventoryPort, "getAvailability">;
   offers: Pick<OfferPort, "listResaleOffers">;
   clock?: Clock;
+  guardrails?: ResaleGuardrails;
 };
+
+export type ResalePriceCheck =
+  | { allowed: true; maxDrops: string | null }
+  | { allowed: false; maxDrops: string; message: string };
 
 const MESSAGES: Record<ResaleEligibility["reasonCode"], string> = {
   PRIMARY_SOLD_OUT: `Primary tickets have sold out, so resale tickets are listed here. ${RESALE_LIMITATION_NOTICE}`,
@@ -37,8 +54,33 @@ const MESSAGES: Record<ResaleEligibility["reasonCode"], string> = {
 export class ResalePolicy implements ResalePolicyPort {
   private readonly clock: Clock;
 
+  private readonly maxMarkupPercent: number | null;
+
   constructor(private readonly deps: ResalePolicyDeps) {
     this.clock = deps.clock ?? systemClock;
+    const pct = deps.guardrails?.maxMarkupPercent;
+    if (pct !== undefined && (!Number.isInteger(pct) || pct < 0 || pct > 1000)) {
+      throw new Error("maxMarkupPercent must be an integer between 0 and 1000");
+    }
+    this.maxMarkupPercent = pct ?? null;
+  }
+
+  /** Text for the UI when a price cap is on, or null when there is none. */
+  priceCapNotice(): string | null {
+    if (this.maxMarkupPercent === null) return null;
+    const cap = this.maxMarkupPercent === 0 ? "face value" : `${this.maxMarkupPercent}% above face value`;
+    return `In this app, resale tickets can't be listed above ${cap}. This doesn't apply to sales made outside the app.`;
+  }
+
+  /**
+   * Check a resale price before the seller creates the offer on XRPL, so they are not left with a
+   * live offer the app will hide. Agent B's resale-offer route can call this (XRPL-036).
+   */
+  checkResalePrice(faceValueDrops: string, amountDrops: string): ResalePriceCheck {
+    if (this.maxMarkupPercent === null) return { allowed: true, maxDrops: null };
+    const maxDrops = maxResalePriceDrops(faceValueDrops, this.maxMarkupPercent);
+    if (BigInt(amountDrops) <= BigInt(maxDrops)) return { allowed: true, maxDrops };
+    return { allowed: false, maxDrops, message: this.priceCapNotice()! };
   }
 
   /** GET /api/events/:id/resale-eligibility. Unknown events read as not published. */
@@ -69,7 +111,9 @@ export class ResalePolicy implements ResalePolicyPort {
   async listPublicOffers(eventId: string): Promise<{ eligibility: ResaleEligibility; offers: ResaleListing[] }> {
     const eligibility = await this.getEligibility(eventId);
     if (!eligibility.isPublicResaleAllowed) return { eligibility, offers: [] };
-    const offers = (await this.deps.offers.listResaleOffers(eventId)).filter((o) => isPublicResaleListing(o, eventId));
+    const offers = (await this.deps.offers.listResaleOffers(eventId)).filter(
+      (o) => isPublicResaleListing(o, eventId) && this.withinPriceCap(o),
+    );
     return { eligibility, offers };
   }
 
@@ -81,6 +125,15 @@ export class ResalePolicy implements ResalePolicyPort {
     const { offers } = await this.listPublicOffers(eventId);
     return offers.find((o) => o.offerId === offerId) ?? null;
   }
+
+  private withinPriceCap(o: ResaleListing): boolean {
+    return this.checkResalePrice(o.ticket.faceValueDrops, o.amountDrops).allowed;
+  }
+}
+
+/** Highest allowed resale price: face value × (100 + percent) / 100, rounded down, in integer drops. */
+export function maxResalePriceDrops(faceValueDrops: string, maxMarkupPercent: number): string {
+  return ((BigInt(faceValueDrops) * BigInt(100 + maxMarkupPercent)) / BigInt(100)).toString();
 }
 
 /** Sold out only when there was supply and none is left; both fields must agree. */
