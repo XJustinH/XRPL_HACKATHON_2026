@@ -18,3 +18,6 @@ next-env.d.ts
 
 # generated Prisma client (rebuilt by `npm install` / `prisma generate`)
 /src/generated/
+
+# XRPL dev wallets (throwaway Testnet seeds, Agent B)
+.xrpl-dev-wallets*.json

@@ -15,6 +15,7 @@
 export * from "./common";
 export * from "./entities";
 export * from "./events";
+export * from "./xrpl";
 
 // Names declared in more than one slice. The explicit export picks the canonical
 // definition (common.ts / entities.ts, which match the database) and resolves the
