@@ -1,0 +1,360 @@
+// Core data model for the NFT ticketing MVP (XRPL-005).
+// Owner: Agent A. Other agents request changes; do not add parallel migrations.
+//
+// Source-of-truth rules (see docs/architecture.md):
+// - XRPL is authoritative for NFT identity, current owner and offer state.
+// - Columns prefixed `cached` / `lastSynced*` are a read cache for speed and analytics only.
+// - XRP amounts are integer drops stored as decimal strings (CHECK constraints in the migration).
+// - All timestamps are timestamptz (UTC).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  CUSTOMER
+  SELLER
+  ORGANISER
+}
+
+enum XrplNetwork {
+  TESTNET
+  DEVNET
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+}
+
+/// Lifecycle of a ticket NFT mint. MINTED only after a validated tesSUCCESS NFTokenMint.
+enum MintStatus {
+  PENDING
+  SUBMITTED
+  MINTED
+  FAILED
+}
+
+/// How fresh the cached on-chain view of a row is. Never a substitute for a ledger read.
+enum SyncStatus {
+  UNSYNCED
+  SYNCED
+  STALE
+  ERROR
+}
+
+enum OfferKind {
+  PRIMARY
+  RESALE
+  PRIVATE
+  GIFT
+}
+
+enum OfferState {
+  /// App created an intent; wallet has not signed / tx not validated yet.
+  PENDING_SIGNATURE
+  /// NFTokenCreateOffer validated; offer exists on ledger.
+  ACTIVE
+  /// NFTokenAcceptOffer validated.
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+  /// Creation tx rejected, expired or failed on ledger.
+  FAILED
+  /// Offer no longer valid on ledger (e.g. NFT moved) but not explicitly cancelled.
+  STALE
+}
+
+enum LedgerTxStatus {
+  /// Hash known (or sign request created) but not yet in a validated ledger.
+  PENDING
+  /// validated === true and TransactionResult === tesSUCCESS.
+  VALIDATED_SUCCESS
+  /// validated === true and TransactionResult !== tesSUCCESS.
+  VALIDATED_FAILURE
+  /// Never validated before LastLedgerSequence / rejected by signer.
+  DROPPED
+}
+
+enum LedgerTxType {
+  NFTokenMint
+  NFTokenCreateOffer
+  NFTokenAcceptOffer
+  NFTokenCancelOffer
+  Payment
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id          String    @id @default(uuid()) @db.Uuid
+  role        UserRole  @default(CUSTOMER)
+  displayName String
+  /// Non-sensitive preferences only (UI, opt-ins). Never secrets or tokens.
+  settings    Json      @default("{}")
+  onboardedAt DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  wallets         WalletLink[]
+  events          Event[]         @relation("EventSeller")
+  checkInsScanned CheckInRecord[] @relation("CheckInOrganiser")
+  offersCreated   NFTOffer[]      @relation("OfferCreatedBy")
+}
+
+/// A classic address linked to a user. A row with verifiedAt = null proves nothing:
+/// control is only established by a wallet-signed challenge (XRPL-012).
+model WalletLink {
+  id                   String      @id @default(uuid()) @db.Uuid
+  userId               String      @db.Uuid
+  network              XrplNetwork @default(TESTNET)
+  address              String
+  verifiedAt           DateTime?   @db.Timestamptz(3)
+  /// e.g. "xaman-signin"
+  verificationProvider String?
+  /// Provider payload/session reference for audit. Not a secret.
+  verificationRef      String?
+  revokedAt            DateTime?   @db.Timestamptz(3)
+  createdAt            DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime    @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One address belongs to at most one app user per network.
+  @@unique([network, address])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Events and inventory
+// ---------------------------------------------------------------------------
+
+model Event {
+  id          String      @id @default(uuid()) @db.Uuid
+  sellerId    String      @db.Uuid
+  title       String
+  description String      @default("")
+  startsAt    DateTime    @db.Timestamptz(3)
+  endsAt      DateTime?   @db.Timestamptz(3)
+  venue       String
+  city        String
+  status      EventStatus @default(DRAFT)
+  artworkUrl  String?
+  publishedAt DateTime?   @db.Timestamptz(3)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+
+  seller            User               @relation("EventSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  tiers             TicketTier[]
+  tickets           TicketNFT[]
+  checkInChallenges CheckInChallenge[]
+  checkIns          CheckInRecord[]
+
+  @@index([status, startsAt])
+  @@index([sellerId])
+}
+
+model TicketTier {
+  id             String   @id @default(uuid()) @db.Uuid
+  eventId        String   @db.Uuid
+  name           String
+  description    String   @default("")
+  /// Integer drops as a decimal string, e.g. "2500000" (= 2.5 XRP).
+  priceDrops     String
+  totalSupply    Int
+  /// Number of tickets with a validated NFTokenMint (MintStatus.MINTED).
+  mintedQuantity Int      @default(0)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  event   Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tickets TicketNFT[]
+
+  @@unique([eventId, name])
+  @@index([eventId])
+}
+
+/// One row per intended ticket NFT. The row may exist before the mint is validated
+/// (mintStatus PENDING/SUBMITTED); nftokenId is set only from a validated mint.
+model TicketNFT {
+  id                String     @id @default(uuid()) @db.Uuid
+  eventId           String     @db.Uuid
+  tierId            String     @db.Uuid
+  /// 1-based serial within the tier.
+  serial            Int
+  /// On-ledger NFTokenID (64 hex). Unique; null until the mint is validated.
+  nftokenId         String?    @unique
+  issuerAddress     String?
+  metadataUri       String?
+  mintStatus        MintStatus @default(PENDING)
+  mintTxHash        String?    @unique
+  mintedAt          DateTime?  @db.Timestamptz(3)
+  /// Validated primary-sale acceptance. Drives primary sell-out (XRPL-020/032).
+  primarySoldAt     DateTime?  @db.Timestamptz(3)
+  primarySaleTxHash String?    @unique
+
+  // --- Cached ownership: NOT authoritative. Re-read XRPL before any transfer/check-in. ---
+  cachedOwnerAddress   String?
+  ownerSyncStatus      SyncStatus @default(UNSYNCED)
+  ownerSyncedAt        DateTime?  @db.Timestamptz(3)
+  ownerSyncLedgerIndex Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  event             Event              @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  tier              TicketTier         @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  offers            NFTOffer[]
+  checkInChallenges CheckInChallenge[]
+  checkIns          CheckInRecord[]
+
+  @@unique([tierId, serial])
+  @@index([eventId])
+  @@index([cachedOwnerAddress])
+}
+
+// ---------------------------------------------------------------------------
+// Offers and ledger transactions
+// ---------------------------------------------------------------------------
+
+/// Mirror of an XRPL NFT sell offer. The ledger object (offerIndex) is authoritative.
+model NFTOffer {
+  id                 String     @id @default(uuid()) @db.Uuid
+  ticketId           String?    @db.Uuid
+  nftokenId          String
+  /// On-ledger nft_offer_index (64 hex). Null until NFTokenCreateOffer is validated.
+  offerIndex         String?    @unique
+  kind               OfferKind
+  state              OfferState @default(PENDING_SIGNATURE)
+  ownerAddress       String
+  /// Set for PRIVATE and GIFT offers (XRPL Destination field).
+  destinationAddress String?
+  /// Integer drops as a decimal string. "0" only for GIFT.
+  amountDrops        String
+  expiresAt          DateTime?  @db.Timestamptz(3)
+  createTxHash       String?    @unique
+  acceptTxHash       String?
+  cancelTxHash       String?
+  /// Account that accepted the offer, from validated tx metadata (never from the client).
+  acceptedByAddress  String?
+  createdByUserId    String?    @db.Uuid
+  lastSyncedAt       DateTime?  @db.Timestamptz(3)
+  createdAt          DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @db.Timestamptz(3)
+
+  ticket    TicketNFT? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdBy User?      @relation("OfferCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([nftokenId])
+  @@index([ticketId, state])
+  @@index([kind, state])
+}
+
+/// Every XRPL transaction the app asked a wallet to sign or observed while reconciling.
+/// `appliedAt` makes reconciliation idempotent: effects are applied once per hash.
+model LedgerTransaction {
+  id              String         @id @default(uuid()) @db.Uuid
+  /// Null while only a sign request exists (hash not yet known).
+  hash            String?        @unique
+  type            LedgerTxType
+  network         XrplNetwork    @default(TESTNET)
+  account         String?
+  status          LedgerTxStatus @default(PENDING)
+  /// Engine result, e.g. tesSUCCESS, tecNO_PERMISSION.
+  resultCode      String?
+  ledgerIndex     Int?
+  validatedAt     DateTime?      @db.Timestamptz(3)
+  /// Set when the app has applied this tx's effects to its own tables.
+  appliedAt       DateTime?      @db.Timestamptz(3)
+  /// Wallet provider sign request / payload id (e.g. Xaman payload uuid).
+  signRequestRef  String?        @unique
+  relatedTicketId String?        @db.Uuid
+  relatedOfferId  String?        @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([relatedTicketId])
+  @@index([relatedOfferId])
+}
+
+// ---------------------------------------------------------------------------
+// Check-in
+// ---------------------------------------------------------------------------
+
+/// Short-lived, single-use challenge shown as a QR at the gate (XRPL-044/045).
+model CheckInChallenge {
+  id             String    @id @default(uuid()) @db.Uuid
+  nonce          String    @unique
+  ticketId       String    @db.Uuid
+  eventId        String    @db.Uuid
+  walletAddress  String
+  expiresAt      DateTime  @db.Timestamptz(3)
+  consumedAt     DateTime? @db.Timestamptz(3)
+  /// Reference to the wallet-signed proof (provider payload id / signature hash).
+  proofReference String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  ticket  TicketNFT      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  event   Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  checkIn CheckInRecord?
+
+  @@index([ticketId])
+  @@index([eventId, expiresAt])
+}
+
+/// Exactly one admission per ticket per event, enforced by the unique index.
+model CheckInRecord {
+  id                  String   @id @default(uuid()) @db.Uuid
+  ticketId            String   @db.Uuid
+  eventId             String   @db.Uuid
+  organiserId         String   @db.Uuid
+  challengeId         String?  @unique @db.Uuid
+  walletAddress       String
+  scannedAt           DateTime @default(now()) @db.Timestamptz(3)
+  /// Ledger index at which ownership was verified for this admission.
+  verifiedLedgerIndex Int?
+
+  ticket    TicketNFT         @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  event     Event             @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  organiser User              @relation("CheckInOrganiser", fields: [organiserId], references: [id], onDelete: Restrict)
+  challenge CheckInChallenge? @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+
+  @@unique([ticketId, eventId])
+  @@index([eventId, scannedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Request idempotency for retriable mutations (mint / purchase / check-in)
+// ---------------------------------------------------------------------------
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Client-supplied Idempotency-Key header value.
+  key            String
+  /// Authenticated user, or a stable system scope for internal jobs.
+  scope          String
+  /// e.g. "POST /api/events/:id/mints"
+  route          String
+  /// Hash of the normalised request body; a reused key with a different body is rejected.
+  requestHash    String
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+
+  @@unique([scope, route, key])
+  @@index([expiresAt])
+}
