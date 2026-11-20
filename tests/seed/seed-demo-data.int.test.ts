@@ -1,13 +1,14 @@
 import "dotenv/config";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { listDemoPersonas } from "@/lib/auth/onboarding";
 import { createPrismaClient } from "@/lib/db/client";
 import { DEMO_IDS, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
 import { SeedConflictError, seedDemoData } from "../../scripts/seed/seed-demo-data";
 
 /**
  * XRPL-008 seed behaviour against a real Postgres (`npm run test:db`).
- * Shares the *_test database with src/lib/db/schema.int.test.ts; the db Vitest project runs
- * files one at a time so the truncation below cannot race with that suite.
+ * Shares the *_test database with the other DB suites; the db Vitest project runs files one at
+ * a time so the truncation below cannot race with them.
  */
 
 const url = process.env.TEST_DATABASE_URL;
@@ -40,6 +41,7 @@ describe("seedDemoData", () => {
       users: { created: demoUsers.length, existing: 0 },
       events: { created: demoEvents.length, existing: 0 },
       tiers: { created: demoTiers.length, existing: 0 },
+      demoFlagsRestored: 0,
     });
     expect(await counts()).toEqual(fixtureCounts);
 
@@ -63,8 +65,31 @@ describe("seedDemoData", () => {
       users: { created: 0, existing: demoUsers.length },
       events: { created: 0, existing: demoEvents.length },
       tiers: { created: 0, existing: demoTiers.length },
+      demoFlagsRestored: 0,
     });
     expect(await counts()).toEqual(fixtureCounts);
+  });
+
+  it("makes exactly the seeded users available as demo login personas", async () => {
+    await db.user.create({ data: { displayName: "Real user", role: "CUSTOMER" } });
+
+    await seedDemoData(db);
+
+    const personas = await listDemoPersonas(db);
+    expect(personas.map((p) => p.userId).sort()).toEqual(demoUsers.map((u) => u.id).sort());
+  });
+
+  it("restores isDemo on existing demo users that lost it", async () => {
+    // e.g. rows inserted by a checkout from before the isDemo column existed.
+    await seedDemoData(db);
+    const stale = [DEMO_IDS.users.customer, DEMO_IDS.users.organiser];
+    await db.user.updateMany({ where: { id: { in: stale } }, data: { isDemo: false } });
+
+    const summary = await seedDemoData(db);
+
+    expect(summary.demoFlagsRestored).toBe(stale.length);
+    expect(await db.user.count({ where: { isDemo: true } })).toBe(demoUsers.length);
+    expect(await listDemoPersonas(db)).toHaveLength(demoUsers.length);
   });
 
   it("does not duplicate records when two runs overlap", async () => {
