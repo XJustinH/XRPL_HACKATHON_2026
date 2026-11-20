@@ -26,13 +26,18 @@ export default defineConfig({
       },
       {
         // Requires Postgres (`npm run db:up`) and TEST_DATABASE_URL.
-        // DB test files share one database: keep them in a single file or make them independent.
+        // DB test files share one database and truncate it, so they run one file at a time
+        // in a single fork. Tests within a file still run in order. test-setup.ts points
+        // DATABASE_URL (used by getDb() in code under test) at the *_test database.
         extends: true,
         test: {
           name: "db",
           environment: "node",
-          include: ["src/**/*.int.test.ts"],
+          include: ["src/**/*.int.test.ts", "tests/**/*.int.test.ts"],
           globalSetup: ["./src/lib/db/test-global-setup.ts"],
+          setupFiles: ["./src/lib/db/test-setup.ts"],
+          pool: "forks",
+          poolOptions: { forks: { singleFork: true } },
         },
       },
     ],

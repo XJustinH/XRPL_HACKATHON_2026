@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { getCurrentSession, toHeaderSession } from "@/lib/auth/current-session";
 
 export const metadata: Metadata = {
   title: {
@@ -18,14 +19,15 @@ export const viewport: Viewport = {
   // User scaling is left enabled deliberately; never set maximumScale here.
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   /*
-   * The session is null until wallet-backed sessions exist (XRPL-010 /
-   * XRPL-012). The header is already session-aware so wiring it later is a
-   * one-line change here rather than a component rewrite.
+   * Server-side session from XRPL-010. Reading the session cookie makes every
+   * route dynamic. Navigation visibility stays presentation only: route handlers
+   * enforce access themselves.
    */
+  const session = await getCurrentSession();
   return (
     <html lang="en">
       <body className="flex min-h-dvh flex-col">
@@ -35,7 +37,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <SiteHeader session={null} />
+        <SiteHeader session={session ? toHeaderSession(session) : null} />
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
           {children}
         </main>

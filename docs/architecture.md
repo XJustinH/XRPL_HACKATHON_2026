@@ -50,6 +50,9 @@ Detailed agent ownership and the route catalogue live in [CLAUDE_AGENT_HANDOFFS.
    gate, read the current owner from XRPL (`account_nfts` / B's `getOwner`).
 5. **Client-supplied buyer/owner addresses are never trusted.** Buyer and new owner come from
    validated transaction metadata.
+6. **A session identifies an app user, not a wallet.** Session cookies are random tokens stored
+   only as hashes (`src/lib/auth/`). Wallet control is established only by a wallet-signed
+   challenge (XRPL-012), and roles are enforced server-side (XRPL-013).
 
 ## 4. Data model (XRPL-005)
 

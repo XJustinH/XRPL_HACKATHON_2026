@@ -36,3 +36,26 @@ describe("getServerEnv", () => {
     }
   });
 });
+
+describe("DEMO_LOGIN_ENABLED", () => {
+  it("defaults to on outside production and off in production", () => {
+    expect(getServerEnv({ ...base }).DEMO_LOGIN_ENABLED).toBe(true);
+    expect(
+      getServerEnv({ ...base, NODE_ENV: "production", SESSION_SECRET: "x".repeat(32) }).DEMO_LOGIN_ENABLED,
+    ).toBe(false);
+  });
+
+  it("accepts explicit true/false/1/0 and blank as unset", () => {
+    expect(getServerEnv({ ...base, DEMO_LOGIN_ENABLED: "false" }).DEMO_LOGIN_ENABLED).toBe(false);
+    expect(getServerEnv({ ...base, DEMO_LOGIN_ENABLED: "0" }).DEMO_LOGIN_ENABLED).toBe(false);
+    expect(
+      getServerEnv({ ...base, NODE_ENV: "production", SESSION_SECRET: "x".repeat(32), DEMO_LOGIN_ENABLED: "TRUE" })
+        .DEMO_LOGIN_ENABLED,
+    ).toBe(true);
+    expect(getServerEnv({ ...base, DEMO_LOGIN_ENABLED: "" }).DEMO_LOGIN_ENABLED).toBe(true);
+  });
+
+  it("rejects anything else", () => {
+    expect(() => getServerEnv({ ...base, DEMO_LOGIN_ENABLED: "yes please" })).toThrow(/DEMO_LOGIN_ENABLED/);
+  });
+});
