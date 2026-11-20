@@ -3,6 +3,7 @@ import type {
   EventDraftInput,
   EventPatch,
   EventView,
+  Page,
   TicketTierInput,
   TicketTierPatch,
   TicketTierView,
@@ -116,24 +117,72 @@ export async function getEventView(db: EventDb, eventId: string): Promise<EventV
 }
 
 /**
- * Published events only, soonest first, excluding events that have already
- * started.
+ * Encodes a keyset cursor for the public listing.
  *
- * This is the query behind the public listing (XRPL-018). Drafts are filtered
- * in the database rather than after loading, so an unpublished event cannot
- * reach a public response by accident.
+ * The pair (startsAt, id) is unique and matches the sort order, so paging is
+ * stable even when events are published while a reader is part-way through —
+ * which an offset would not be. The value is opaque by contract; callers must
+ * not parse it.
+ */
+export function encodeEventCursor(event: { startsAt: string; id: string }): string {
+  return Buffer.from(`${event.startsAt}|${event.id}`, "utf8").toString("base64url");
+}
+
+function decodeEventCursor(cursor: string): { startsAt: Date; id: string } | null {
+  try {
+    const [startsAt, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+    if (!startsAt || !id) return null;
+    const date = new Date(startsAt);
+    return Number.isNaN(date.getTime()) ? null : { startsAt: date, id };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Published, not-yet-started events, soonest first (XRPL-018).
+ *
+ * Status and start time are filtered in the query rather than after loading, so
+ * a draft or a finished event cannot reach a public response by accident.
+ *
+ * Text, city, date and price filters belong to XRPL-059 and are deliberately
+ * not read here: accepting a filter and silently ignoring it would be worse
+ * than not offering it yet.
  */
 export async function listPublishedEvents(
   db: EventDb,
-  options: { now?: Date; take?: number } = {},
-): Promise<EventView[]> {
+  options: { now?: Date; limit?: number; cursor?: string } = {},
+): Promise<Page<EventView>> {
+  const now = options.now ?? new Date();
+  const limit = Math.min(Math.max(options.limit ?? 12, 1), 50);
+  const after = options.cursor ? decodeEventCursor(options.cursor) : null;
+
+  // An unreadable cursor is treated as no cursor: a bad link shows the first
+  // page instead of an error.
+  const keyset = after
+    ? {
+        OR: [
+          { startsAt: { gt: after.startsAt } },
+          { startsAt: after.startsAt, id: { gt: after.id } },
+        ],
+      }
+    : {};
+
   const rows = await db.event.findMany({
-    where: { status: "PUBLISHED", startsAt: { gt: options.now ?? new Date() } },
-    orderBy: [{ startsAt: "asc" }],
-    take: options.take ?? 50,
+    where: { status: "PUBLISHED", startsAt: { gt: now }, ...keyset },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+    // One extra row reveals whether another page exists without a second count.
+    take: limit + 1,
     include: eventInclude,
   });
-  return rows.map(toEventView);
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(toEventView);
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor: hasMore && last ? encodeEventCursor(last) : null,
+  };
 }
 
 /** A published event by id. Returns null for drafts, so callers cannot leak one. */

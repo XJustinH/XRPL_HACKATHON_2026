@@ -218,6 +218,15 @@ export type ResaleEligibility = {
  * Discovery (XRPL-059, XRPL-089, XRPL-090)
  * ------------------------------------------------------------------ */
 
+/**
+ * A cursor page of results.
+ *
+ * Matches the shape produced by `pageOf()` in `./common`, which ships the Zod
+ * helper but no TypeScript type. Declared here because the event read models
+ * need it; worth moving to `./common` if another slice wants it too.
+ */
+export type Page<T> = { items: T[]; nextCursor: string | null };
+
 export const EventSort = z.enum(["SOONEST", "PRICE_ASC", "RECOMMENDED"]);
 export type EventSort = z.infer<typeof EventSort>;
 
