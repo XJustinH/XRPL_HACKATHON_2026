@@ -31,6 +31,8 @@ to 6 https image URLs (the first is the cover), stock, and a status.
 | `products.ts` | The service: create, update, adjust stock, get, list |
 | `testing/fakes.ts` | In-memory `ProductStore` (atomic stock changes) and `EventOwnership` for tests |
 | `products.test.ts` | Unit tests for every rule above |
+| `product-store.ts` | `PrismaProductStore`: the `ProductStore` on the `PhysicalProduct` table (XRPL-065) |
+| `server.ts` | `commerceDeps()`: the service wired to Postgres for routes and pages |
 
 ### Schema request: PhysicalProduct (XRPL-064)
 
@@ -88,10 +90,37 @@ Once the table exists, the Prisma `ProductStore` adjusts stock in one statement
 (`updateMany` where `stock >= -delta`, incrementing by `delta`) and treats zero rows as "insufficient
 stock", with the CHECK constraint as a backstop.
 
+The schema above landed in migration `20261121005533_add_physical_products`.
+
+## Selling, cart, orders and order history (XRPL-065 to 069)
+
+Full description, routes, stock and status rules and limitations: [`docs/merch.md`](../../../docs/merch.md).
+
+- **Payment is simulated.** Placing an order moves no money, submits nothing to the ledger, and asks for
+  and stores no card details.
+- **Placing an order takes stock exactly once.** The products are row-locked and decremented in the
+  transaction that creates the order, and `POST /api/orders` runs through `runIdempotent`, so a repeated
+  request replays instead of ordering twice.
+- **Cancelling restocks.** A cancelled order's items go back into stock, once.
+- **Order statuses:** new → processing → shipped → fulfilled, and new or processing → cancelled
+  (`MERCH_ORDER_STATUS_CHANGES`).
+- **Who reads an order:** its purchaser and its seller. Everyone else gets 404.
+
+| File | Purpose |
+|---|---|
+| `orders.ts` | Cart quote, place order, order lists, read an order, change status (with restock on cancel) |
+| `orders.int.test.ts` | DB tests: stock taken once (concurrent last unit, replayed request), cancel restocks, state machine, who can read |
+| `route-helpers.ts` | `:id` parsing and headers shared by the merchandise routes |
+| `product-manager.tsx` | Seller UI: create and edit products, photos, stock, publish and withdraw |
+| `order-status-controls.tsx` | Seller's status buttons for an order |
+| `order-summary.tsx` | Order card, items list and status badge shared by the order pages |
+| `seller-merch-section.tsx` | `SellerMerchSection({ sellerId })` for the public storefront, plus `ProductCard` |
+| `add-to-cart.tsx` | Add-to-cart control. Not offered for unpublished or out-of-stock products |
+| `cart-store.ts` | The cart in `localStorage`: ids, quantities and names only |
+| `cart-view.tsx`, `cart-view.test.tsx` | Cart review, subtotal and simulated checkout, with its test |
+
+Pages: `/seller/products`, `/sellers/[id]/merch`, `/products/[id]`, `/cart`, `/orders`, `/orders/[id]`.
+
 ### Next
 
-- After the schema lands: the Prisma `ProductStore` with DB tests, and the routes in the handoff's §5.5
-  (`POST /api/sellers/me/products`, `PATCH /api/products/:id`, `GET /api/products/:id`,
-  `GET /api/sellers/:id/products`, plus `POST /api/products/:id/stock`).
-- XRPL-065 (seller management UI) and XRPL-066 (browsing, filling the storefront's merchandise section).
-- Orders (XRPL-067/068) reserve and release stock through the same atomic adjustment.
+- Digital collectibles (XRPL-070 to 075) and merchandise in analytics (XRPL-078).
