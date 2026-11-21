@@ -552,6 +552,7 @@ describe("getTransaction / getValidatedTx", () => {
       account: OWNER,
       nftokenId: NFT_ID,
       offerIndex: null,
+      acceptedSellOfferIndex: null,
       explorerUrl: `https://testnet.xrpl.org/transactions/${TX_HASH}`,
     });
   });
@@ -564,6 +565,24 @@ describe("getTransaction / getValidatedTx", () => {
       }),
     );
     expect(await service.getTransaction(TX_HASH)).toMatchObject({ offerIndex: OFFER_INDEX, nftokenId: null });
+  });
+
+  it("picks up the sell offer an NFTokenAcceptOffer took, and the NFT it moved", async () => {
+    const accept = (fields: Record<string, unknown>) =>
+      setup(() => txResult({ tx_json: { TransactionType: "NFTokenAcceptOffer", ...fields } })).service;
+
+    const bought = await accept({ Account: BUYER, NFTokenSellOffer: OFFER_INDEX.toLowerCase() }).getValidatedTx(TX_HASH);
+    ConfirmedLedgerTx.parse(bought); // contract conformance
+    expect(bought).toMatchObject({
+      account: BUYER,
+      nftokenId: NFT_ID,
+      offerIndex: null, // an accept creates no offer
+      acceptedSellOfferIndex: OFFER_INDEX,
+    });
+
+    // The NFT's owner accepting a buy offer took no sell offer.
+    const sold = await accept({ Account: OWNER, NFTokenBuyOffer: OFFER_INDEX }).getTransaction(TX_HASH);
+    expect(sold).toMatchObject({ acceptedSellOfferIndex: null, nftokenId: NFT_ID });
   });
 
   it("never treats a pending transaction as confirmed", async () => {

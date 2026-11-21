@@ -97,8 +97,16 @@ async function listedEvent(tickets = 2) {
   return { seller, event, offers };
 }
 
-/** The buyer accepts `offer` on the ledger: a validated NFTokenAcceptOffer. */
-function acceptOnLedger(offer: { offerIndex: string | null; nftokenId: string }, buyer = BUYER): string {
+/**
+ * The buyer accepts `offer` on the ledger: a validated NFTokenAcceptOffer, shaped as Agent B's reader
+ * reports it (checked on Testnet): the offer taken is `acceptedSellOfferIndex`, and `offerIndex`, which is
+ * for offers created, is null. With `broker`, a broker submits the accept and the NFT goes to `buyer`.
+ */
+function acceptOnLedger(
+  offer: { offerIndex: string | null; nftokenId: string },
+  buyer = BUYER,
+  { broker }: { broker?: string } = {},
+): string {
   const hash = hex64();
   ledger.txs.set(hash, {
     hash,
@@ -106,9 +114,10 @@ function acceptOnLedger(offer: { offerIndex: string | null; nftokenId: string },
     ledgerIndex: 4242,
     closeTime: CLOSE_TIME,
     transactionType: "NFTokenAcceptOffer",
-    account: buyer,
+    account: broker ?? buyer,
     nftokenId: offer.nftokenId,
-    offerIndex: offer.offerIndex,
+    offerIndex: null,
+    acceptedSellOfferIndex: offer.offerIndex,
   });
   ledger.owners.set(offer.nftokenId, buyer);
   return hash;
@@ -136,7 +145,7 @@ describe("recording a validated primary sale", () => {
       kind: "PRIMARY_SALE",
       offerId: offers[0]!.id,
       ticketId: offers[0]!.ticketId,
-      buyerAddress: BUYER,
+      acceptedByAddress: BUYER,
     });
 
     const offer = await db.nFTOffer.findUniqueOrThrow({ where: { id: offers[0]!.id } });
@@ -188,13 +197,20 @@ describe("recording a validated primary sale", () => {
     const { offers } = await listedEvent(1);
     const mint = hex64();
     ledger.txs.set(mint, {
-      hash: mint, result: "tesSUCCESS", ledgerIndex: 1, closeTime: null,
-      transactionType: "NFTokenMint", account: SELLER_WALLET, nftokenId: offers[0]!.nftokenId, offerIndex: null,
+      hash: mint, result: "tesSUCCESS", ledgerIndex: 1, closeTime: null, transactionType: "NFTokenMint",
+      account: SELLER_WALLET, nftokenId: offers[0]!.nftokenId, offerIndex: null, acceptedSellOfferIndex: null,
     });
     expect(await reconcileLedgerTransaction(deps, mint)).toEqual({ outcome: "NOT_APPLICABLE", reason: "NOT_AN_ACCEPT" });
 
     const foreign = acceptOnLedger({ offerIndex: hex64(), nftokenId: hex64() });
     expect(await reconcileLedgerTransaction(deps, foreign)).toEqual({ outcome: "NOT_APPLICABLE", reason: "UNKNOWN_OFFER" });
+
+    // The NFT's holder accepting someone's buy offer took no sell offer, so none of the app's.
+    const buyOfferTaken = acceptOnLedger({ offerIndex: null, nftokenId: offers[0]!.nftokenId }, SELLER_WALLET);
+    expect(await reconcileLedgerTransaction(deps, buyOfferTaken)).toEqual({
+      outcome: "NOT_APPLICABLE",
+      reason: "UNKNOWN_OFFER",
+    });
 
     await db.nFTOffer.update({ where: { id: offers[0]!.id }, data: { kind: "RESALE" } });
     const resale = acceptOnLedger(offers[0]!);
@@ -206,6 +222,25 @@ describe("recording a validated primary sale", () => {
     const { offers } = await listedEvent(1);
     const hash = acceptOnLedger({ offerIndex: offers[0]!.offerIndex, nftokenId: hex64() });
     await expect(reconcileLedgerTransaction(deps, hash)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("records a brokered sale without guessing the new owner", async () => {
+    const { event, offers } = await listedEvent(1);
+    const BROKER = "rUn84CUYbNjRoTQ6mSW7BVJPSVJNLb1QLo";
+    const hash = acceptOnLedger(offers[0]!, BUYER, { broker: BROKER });
+
+    expect(await reconcileLedgerTransaction(deps, hash)).toMatchObject({ outcome: "APPLIED", acceptedByAddress: BROKER });
+    expect(await db.nFTOffer.findUniqueOrThrow({ where: { id: offers[0]!.id } })).toMatchObject({
+      state: "ACCEPTED",
+      acceptedByAddress: BROKER,
+    });
+    // The broker doesn't hold the NFT, so the owner is left for the next ownership sync.
+    expect(await db.ticketNFT.findUniqueOrThrow({ where: { id: offers[0]!.ticketId! } })).toMatchObject({
+      primarySaleTxHash: hash,
+      cachedOwnerAddress: null,
+      ownerSyncStatus: "STALE",
+    });
+    expect(await getPrimaryAvailability(db, event.id)).toMatchObject({ sold: 1, isSoldOut: true });
   });
 });
 
@@ -316,7 +351,7 @@ describe("POST /api/ledger/transactions/:hash/reconcile", () => {
 
     const res = await post(hash, cookie);
     expect(res.status).toBe(200);
-    expect((await res.json()).data).toMatchObject({ outcome: "APPLIED", buyerAddress: BUYER });
+    expect((await res.json()).data).toMatchObject({ outcome: "APPLIED", acceptedByAddress: BUYER });
     expect((await (await post(hash, cookie)).json()).data.outcome).toBe("ALREADY_APPLIED");
   });
 

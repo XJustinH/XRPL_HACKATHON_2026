@@ -491,6 +491,7 @@ export class XrplQueryService {
       closeTime: null,
       nftokenId: null,
       offerIndex: null,
+      acceptedSellOfferIndex: null,
       explorerUrl: null,
       provenance: missingProvenance(notFound?.endpoint, false),
     };
@@ -540,6 +541,7 @@ export class XrplQueryService {
       account: tx.account,
       nftokenId: tx.nftokenId,
       offerIndex: tx.offerIndex,
+      acceptedSellOfferIndex: tx.acceptedSellOfferIndex,
       explorerUrl: tx.explorerUrl,
     };
   }
@@ -604,6 +606,8 @@ export class XrplQueryService {
       closeTime: result.close_time_iso ?? null,
       nftokenId: hexField(meta, "nftoken_id"),
       offerIndex: hexField(meta, "offer_id"),
+      acceptedSellOfferIndex:
+        result.tx_json.TransactionType === "NFTokenAcceptOffer" ? hexField(result.tx_json, "NFTokenSellOffer") : null,
       explorerUrl: validated ? explorerTxUrl(this.config, txHash) : null,
       provenance: {
         endpoint,

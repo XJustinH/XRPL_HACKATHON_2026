@@ -223,6 +223,11 @@ export const LedgerTxLookup = z.object({
   nftokenId: NFTokenId.nullable(),
   /** Offer created (NFTokenCreateOffer, or NFTokenMint with an Amount). */
   offerIndex: OfferIndex.nullable(),
+  /**
+   * Sell offer taken by an NFTokenAcceptOffer (its `NFTokenSellOffer`, also set in a brokered sale).
+   * Null for other transactions, and when an NFT's owner accepted a buy offer.
+   */
+  acceptedSellOfferIndex: OfferIndex.nullable(),
   /** Explorer link, only for validated transactions. */
   explorerUrl: z.string().nullable(),
   provenance: LedgerProvenance,
@@ -240,6 +245,7 @@ export const ConfirmedLedgerTx = z.object({
   account: XrplAddress,
   nftokenId: NFTokenId.nullable(),
   offerIndex: OfferIndex.nullable(),
+  acceptedSellOfferIndex: OfferIndex.nullable(),
   explorerUrl: z.string(),
 });
 export type ConfirmedLedgerTx = z.infer<typeof ConfirmedLedgerTx>;

@@ -142,6 +142,7 @@ function confirmedMint(hash: string, nftokenId: string, account = ISSUER): Confi
     account,
     nftokenId,
     offerIndex: null,
+    acceptedSellOfferIndex: null,
     explorerUrl: `https://testnet.xrpl.org/transactions/${hash}`,
   };
 }
