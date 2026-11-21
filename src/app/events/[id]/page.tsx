@@ -14,6 +14,8 @@ import { formatEventDate, formatXrp, isPastEvent } from "@/features/events/event
 import { cityBrowseHref, venueBrowseHref } from "@/features/discovery/browse-links";
 import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
 import { TicketSelection } from "@/features/events/ticket-selection";
+import { isWishlisted } from "@/features/profiles/wishlist";
+import { WishlistButton } from "@/features/profiles/wishlist-button";
 import { EventReviews } from "@/features/reviews/event-reviews";
 import { ResaleListingCard } from "@/features/transfers/resale-listing-card";
 
@@ -72,6 +74,12 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         return null;
       }),
   ]);
+
+  // Saving is independent of buying, so this is offered whatever the
+  // availability or wallet state (XRPL-062).
+  const saved = session
+    ? await isWishlisted(db, session.userId, id).catch(() => false)
+    : false;
 
   return (
     <>
@@ -133,6 +141,16 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <p className="mt-6 max-w-2xl whitespace-pre-line text-sm text-muted">
           {event.description}
         </p>
+      ) : null}
+
+      {session ? (
+        <div className="mt-6">
+          <WishlistButton
+            eventId={event.id}
+            initialSaved={saved}
+            eventTitle={event.title}
+          />
+        </div>
       ) : null}
 
       {/* Told before clicking through, so a disconnected buyer does not reach
