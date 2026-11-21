@@ -1,7 +1,7 @@
 # XRPL_HACKATHON_2026
 
 ## Title
-To be decided
+Tricket
 
 ## DESCRIPTION
 NFT ticketing, merchandise and fan-engagement platform on the XRP Ledger (**Testnet only**).
@@ -19,7 +19,7 @@ resell in-app, and organisers verify current on-chain ownership for one-time ent
 - XU TAO JUSTIN HE – @XJustinH
 - JASON CONBOY     – @conboyj8
 - DARRAGH O'TOOLE  – @Nimrod999
-- THOMAS SHANAHAN  – @ThOmas-S
+- THOMAS SHANAHAN  – @Th0mas-S
 - OLIVER WOODS     – @woodsol
 
 ## How to run
