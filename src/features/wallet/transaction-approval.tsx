@@ -91,6 +91,12 @@ function outcomeOf(request: TransactionRequest): { tone: "caution" | "critical";
     case "FAILED":
       switch (request.failureReason) {
         case "LEDGER_REJECTED":
+          if (request.engineResult === "tecINSUFFICIENT_RESERVE") {
+            return {
+              tone: "critical",
+              text: "The XRP Ledger rejected the transaction: your wallet doesn't hold enough XRP for the reserve it needs (tecINSUFFICIENT_RESERVE). Add XRP to the wallet and try again. The small network fee was charged; nothing else changed.",
+            };
+          }
           return {
             tone: "critical",
             text: `The XRP Ledger rejected the transaction (${request.engineResult ?? "unknown result"}). The small network fee was charged; nothing else changed.`,

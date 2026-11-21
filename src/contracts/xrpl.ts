@@ -151,6 +151,13 @@ export type LedgerMint = z.infer<typeof LedgerMint>;
 export const AccountMintsPage = pageOf(LedgerMint).extend({
   address: XrplAddress,
   scanned: z.number().int().nonnegative(),
+  /**
+   * The first ledger of the range the node searched (its `ledger_index_min`): where the history it
+   * keeps starts. A page with no `nextCursor` only shows the account has nothing older than this.
+   */
+  earliestLedger: z.number().int().nullable(),
+  /** The oldest transaction read on this page, mint or not; null for an empty page. */
+  oldestScanned: z.object({ ledgerIndex: z.number().int(), closeTime: IsoDateTime.nullable() }).nullable(),
   provenance: LedgerProvenance,
 });
 export type AccountMintsPage = z.infer<typeof AccountMintsPage>;
@@ -342,8 +349,12 @@ export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
 /**
  * Lifecycle of a transaction approval.
- * - PENDING / OPENED: waiting for the user in Xaman.
- * - REJECTED / EXPIRED / CANCELLED: never signed, so nothing was sent. Retry with a new request.
+ * - PENDING / OPENED: waiting for the user in Xaman. Xaman's expiry only limits opening a request. One
+ *   opened in time stays OPENED, with no `expiresAt`, until its transaction's LastLedgerSequence passes
+ *   (XRPL-027). A request without one (offer, purchase and cancel requests today) is reported EXPIRED
+ *   at Xaman's expiry even while it is still open, and can be signed, in Xaman.
+ * - REJECTED / EXPIRED / CANCELLED: not signed. Retry with a new request. REJECTED includes a request
+ *   declined after Xaman's expiry.
  * - SUBMITTED: signed and sent to the network; waiting for a validated ledger.
  * - CONFIRMED: validated with tesSUCCESS. The only success state.
  * - FAILED: see `failureReason`.
@@ -482,11 +493,42 @@ export const PrimaryOfferSummary = z.object({
 });
 export type PrimaryOfferSummary = z.infer<typeof PrimaryOfferSummary>;
 
+/**
+ * Why a `FAILED` ticket's latest mint attempt produced no NFT (XRPL-027), from the app's record of it.
+ * - NOT_APPROVED: not signed in Xaman (declined, cancelled or expired). Nothing was sent.
+ * - REQUEST_FAILED: the approval request could not be created or recorded, so it could not be signed.
+ * - INSUFFICIENT_RESERVE: validated with `tecINSUFFICIENT_RESERVE`: the wallet could not hold the reserve
+ *   for a new NFT page. The fee was charged.
+ * - LEDGER_REJECTED: validated with another `tec…` result. The fee was charged.
+ * - NOT_VALIDATED: signed, but the network refused it or it was not validated in time. Nothing was charged.
+ */
+export const MintFailureReason = z.enum([
+  "NOT_APPROVED",
+  "REQUEST_FAILED",
+  "INSUFFICIENT_RESERVE",
+  "LEDGER_REJECTED",
+  "NOT_VALIDATED",
+]);
+export type MintFailureReason = z.infer<typeof MintFailureReason>;
+
+export const MintFailure = z.object({
+  reason: MintFailureReason,
+  /** The ledger's or network's result code, e.g. `tecINSUFFICIENT_RESERVE`, when there is one. */
+  resultCode: z.string().nullable(),
+  /** Explorer link for a failed transaction that reached a validated ledger (its fee was charged). */
+  txExplorerUrl: z.string().nullable(),
+  /** When the attempt was settled. */
+  at: IsoDateTime,
+});
+export type MintFailure = z.infer<typeof MintFailure>;
+
 export const MintTicketView = TicketDto.extend({
   nftExplorerUrl: z.string().nullable(),
   mintTxExplorerUrl: z.string().nullable(),
   /** Latest primary sale offer for this ticket (XRPL-029), or null if never listed. */
   primaryOffer: PrimaryOfferSummary.nullable(),
+  /** Why the latest mint attempt failed, for `FAILED` tickets (XRPL-027); null otherwise. */
+  mintFailure: MintFailure.nullable(),
 });
 export type MintTicketView = z.infer<typeof MintTicketView>;
 

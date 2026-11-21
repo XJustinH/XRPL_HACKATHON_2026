@@ -162,8 +162,35 @@ export class WalletTransactionRequests {
     };
 
     const walletStatus = signRequestStatus(result.meta);
+    if (walletStatus === "EXPIRED") {
+      // Xaman's `expired` only says its deadline for opening the request has passed (XRPL-027).
+      // Answered without signing: the user declined it, whether before or after that deadline.
+      if (result.meta.resolved) return { ...base, status: "REJECTED" };
+      // Opened in time and not answered yet: it can still be signed. Xaman's expiry no longer
+      // bounds it, so it isn't reported.
+      if (result.meta.app_opened && (await this.stillSignable(result))) {
+        return { ...base, status: "OPENED", expiresAt: null };
+      }
+    }
     if (walletStatus !== "SIGNED") return { ...base, status: walletStatus };
     return this.followOnLedger(base, result);
+  }
+
+  /**
+   * Xaman's expiry is a deadline to open a request, not to answer it: a request opened in time can
+   * still be signed after it has expired. When its transaction carries a LastLedgerSequence, it
+   * stays open until the ledger passes that, since nothing signed later can validate (XRPL-027).
+   * Without one there is no bound, and it counts as expired.
+   */
+  private async stillSignable(result: XamanPayloadResult): Promise<boolean> {
+    const last = result.payload.request_json?.LastLedgerSequence;
+    if (typeof last !== "number") return false;
+    try {
+      const validated = (await this.ledger.getNetworkStatus()).validatedLedger?.index;
+      return validated === undefined || validated <= last;
+    } catch {
+      return true; // Unknown ledger height: keep waiting.
+    }
   }
 
   /** Withdraws a request that has not been signed yet, then returns its current state. */
@@ -213,8 +240,12 @@ export class WalletTransactionRequests {
         : fail("LEDGER_REJECTED", onLedger);
     }
 
+    // A refusal only counts while the node has never seen the transaction: one it holds in a ledger
+    // that isn't validated yet may still validate (XRPL-027), and its LastLedgerSequence settles it.
     const dispatched = result.response.dispatched_result ?? null;
-    if (isNeverApplied(dispatched)) return fail("NETWORK_REJECTED", { engineResult: dispatched });
+    if (isNeverApplied(dispatched) && lookup.status === "NOT_FOUND") {
+      return fail("NETWORK_REJECTED", { engineResult: dispatched });
+    }
 
     const lastLedger = lastLedgerSequenceOf(result.response.hex);
     if (lastLedger !== null) {

@@ -8,6 +8,7 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
 import type { MintStatus } from "@/contracts/entities";
 import type {
   EventMints,
+  MintFailure,
   MintMappingReport,
   MintRequestResult,
   MintTicketView,
@@ -148,17 +149,53 @@ const isRunning = (run: Run | null) => run?.phase === "requesting" || run?.phase
 
 function stopReason(kind: Run["kind"], request: TransactionRequest): string {
   const verb = kind === "mint" ? "minting" : "listing";
+  const noun = kind === "mint" ? "mint" : "listing";
+  // A failed mint frees its ticket, and the next mint retries that ticket (XRPL-027).
+  const retry = kind === "mint" ? " Minting again retries the same ticket." : "";
   switch (request.status) {
     case "REJECTED":
       return kind === "mint"
-        ? "You declined the last ticket in Xaman, so minting stopped."
+        ? `You declined the last ticket in Xaman, so minting stopped.${retry}`
         : "You declined the last listing in Xaman, so listing stopped.";
     case "EXPIRED":
-      return `The last request expired before it was approved, so ${verb} stopped.`;
+      return `The last request expired before it was approved, so ${verb} stopped.${retry}`;
     case "CANCELLED":
-      return `You cancelled the last request, so ${verb} stopped.`;
-    default:
-      return `The last ${kind === "mint" ? "mint" : "listing"} did not go through (${request.engineResult ?? request.failureReason ?? "unknown reason"}), so ${verb} stopped.`;
+      return `You cancelled the last request, so ${verb} stopped.${retry}`;
+    default: {
+      const code = request.engineResult ?? "unknown result";
+      if (request.engineResult === "tecINSUFFICIENT_RESERVE") {
+        return `The XRP Ledger rejected the last ${noun}: your wallet doesn't hold enough XRP for the reserve it needs (tecINSUFFICIENT_RESERVE), so ${verb} stopped. Add XRP to the wallet first.${retry}`;
+      }
+      // Each kind of failure in plain words, with whether the fee was charged (XRPL-027).
+      switch (request.failureReason) {
+        case "LEDGER_REJECTED":
+          return `The XRP Ledger rejected the last ${noun} (${code}) and charged the small network fee, so ${verb} stopped.${retry}`;
+        case "NETWORK_REJECTED":
+          return `The network refused the last ${noun} (${code}), so ${verb} stopped. Nothing was charged.${retry}`;
+        case "NOT_VALIDATED_IN_TIME":
+          return `The last ${noun} wasn't validated before it expired, so ${verb} stopped. Nothing was charged.${retry}`;
+        case "WRONG_NETWORK":
+          return `The last ${noun} was signed on a different network, so ${verb} stopped. Switch Xaman to ${NETWORK_LABEL} first.${retry}`;
+        default:
+          return `The last ${noun} did not go through (${code}), so ${verb} stopped.${retry}`;
+      }
+    }
+  }
+}
+
+/** Why a failed ticket has no NFT yet, from its latest attempt (XRPL-027). */
+function failureText(failure: MintFailure): string {
+  switch (failure.reason) {
+    case "NOT_APPROVED":
+      return "Not approved in Xaman (declined, cancelled or expired). Nothing was sent.";
+    case "REQUEST_FAILED":
+      return "The approval request didn't go through, so nothing was sent.";
+    case "INSUFFICIENT_RESERVE":
+      return "Rejected by the XRP Ledger: the wallet didn't hold enough XRP for the reserve a new NFT page needs (tecINSUFFICIENT_RESERVE). The small fee was charged.";
+    case "LEDGER_REJECTED":
+      return `Rejected by the XRP Ledger (${failure.resultCode ?? "unknown result"}). The small fee was charged.`;
+    case "NOT_VALIDATED":
+      return `Signed, but never validated${failure.resultCode ? ` (${failure.resultCode})` : ""}. Nothing was charged.`;
   }
 }
 
@@ -627,7 +664,8 @@ function TierRow({
                 disabled={!canAct}
                 className={`${remaining > 1 ? secondaryButton : primaryButton} w-full sm:w-auto`}
               >
-                Mint next ticket
+                {/* The server reuses the lowest-numbered failed ticket first (XRPL-027). */}
+                {failed[0] ? `Retry #${failed[0].serial}` : "Mint next ticket"}
               </button>
               {remaining > 1 ? (
                 <button
@@ -660,6 +698,11 @@ function TierRow({
           <summary className="cursor-pointer text-sm font-medium">
             {group.label} ({group.tickets.length})
           </summary>
+          {group.label === "Failed" ? (
+            <p className="mt-2 text-sm text-muted">
+              These never got an NFT. The next mint retries them first, keeping their numbers.
+            </p>
+          ) : null}
           <ul
             className="mt-2 flex flex-col gap-2 text-sm"
             aria-label={`${tier.name}: ${group.label.toLowerCase()} tickets`}
@@ -708,6 +751,21 @@ function TicketRow({ ticket }: { ticket: MintTicketView }) {
         <a href={ticket.mintTxExplorerUrl} target="_blank" rel="noopener noreferrer" className="underline">
           Mint transaction
         </a>
+      ) : null}
+      {ticket.mintFailure ? (
+        <span className="basis-full text-muted">
+          {failureText(ticket.mintFailure)}{" "}
+          {ticket.mintFailure.txExplorerUrl ? (
+            <a
+              href={ticket.mintFailure.txExplorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              Failed transaction
+            </a>
+          ) : null}
+        </span>
       ) : null}
     </li>
   );

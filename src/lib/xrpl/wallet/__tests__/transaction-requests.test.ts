@@ -211,6 +211,56 @@ describe("WalletTransactionRequests.get", () => {
     expect(ledger.getTransaction).not.toHaveBeenCalled();
   });
 
+  describe("a request opened before it expired (XRPL-027)", () => {
+    /** Xaman's expiry only bounds opening: an opened request can still be signed afterwards. */
+    function openedThenExpired(lastLedgerSequence?: number, appOpened = true) {
+      const result = payload({ meta: { expired: true, app_opened: appOpened } });
+      if (lastLedgerSequence !== undefined) {
+        result.payload.request_json = {
+          ...result.payload.request_json,
+          LastLedgerSequence: lastLedgerSequence,
+        };
+      }
+      return result;
+    }
+
+    it("stays OPENED until its LastLedgerSequence passes, since it can still be signed", async () => {
+      const before = setup(openedThenExpired(1000), { validatedIndex: 1000 });
+      // Xaman's expiry is past and no longer bounds it, so the card isn't given one to show.
+      expect(await before.service.get(UUID)).toMatchObject({ status: "OPENED", expiresAt: null });
+      const after = setup(openedThenExpired(1000), { validatedIndex: 1001 });
+      expect(await after.service.get(UUID)).toMatchObject({
+        status: "EXPIRED",
+        expiresAt: "2026-11-20T19:10:00.000Z",
+      });
+    });
+
+    it("is REJECTED once declined, even after Xaman's expiry: nothing is left to sign", async () => {
+      const declinedLate = openedThenExpired(1000);
+      declinedLate.meta.resolved = true;
+      const { ledger, service } = setup(declinedLate, { validatedIndex: 999 });
+
+      expect((await service.get(UUID)).status).toBe("REJECTED");
+      expect(ledger.getNetworkStatus).not.toHaveBeenCalled();
+      // The same for a request with no LastLedgerSequence (offers and purchases today).
+      const offer = openedThenExpired();
+      offer.meta.resolved = true;
+      expect((await setup(offer).service.get(UUID)).status).toBe("REJECTED");
+    });
+
+    it("keeps waiting while the ledger height is unknown", async () => {
+      const { ledger, service } = setup(openedThenExpired(1000));
+      ledger.getNetworkStatus.mockRejectedValueOnce(new XrplServiceError("TIMEOUT", "slow"));
+      expect((await service.get(UUID)).status).toBe("OPENED");
+    });
+
+    it("is EXPIRED without a LastLedgerSequence to bound it, or when it was never opened", async () => {
+      expect((await setup(openedThenExpired()).service.get(UUID)).status).toBe("EXPIRED");
+      const unopened = setup(openedThenExpired(1000, false), { validatedIndex: 999 });
+      expect((await unopened.service.get(UUID)).status).toBe("EXPIRED");
+    });
+  });
+
   it("is CONFIRMED only once the ledger validated it with tesSUCCESS", async () => {
     const { service } = setup(signed(), { tx: lookup({}) });
     expect(TransactionRequest.parse(await service.get(UUID))).toMatchObject({
@@ -242,6 +292,21 @@ describe("WalletTransactionRequests.get", () => {
       failureReason: "NETWORK_REJECTED",
       engineResult: "tefPAST_SEQ",
       explorerUrl: null,
+    });
+  });
+
+  it("doesn't take a refusal at its word while the node holds the transaction unvalidated (XRPL-027)", async () => {
+    const pending = lookup({ status: "PENDING", succeeded: false, ledgerIndex: null, explorerUrl: null });
+    const refused = signed({ hex: SIGNED_HEX_LLS_1000, dispatched_result: "tefPAST_SEQ" });
+
+    const waiting = setup(refused, { tx: pending, validatedIndex: 999 });
+    expect(await waiting.service.get(UUID)).toMatchObject({ status: "SUBMITTED", failureReason: null });
+
+    // Its LastLedgerSequence still settles it.
+    const expired = setup(refused, { tx: pending, validatedIndex: 1001 });
+    expect(await expired.service.get(UUID)).toMatchObject({
+      status: "FAILED",
+      failureReason: "NOT_VALIDATED_IN_TIME",
     });
   });
 

@@ -224,6 +224,7 @@ describe("getAccountMints", () => {
         ? {
             result: {
               account: ISSUER,
+              ledger_index_min: 100,
               ledger_index_max: 950,
               validated: true,
               marker: "PAGE2",
@@ -252,6 +253,8 @@ describe("getAccountMints", () => {
                   { TransactionResult: "tesSUCCESS" },
                   {
                     validated: false,
+                    ledger_index: 880,
+                    close_time_iso: "2026-11-20T20:10:00Z",
                   },
                 ),
               ],
@@ -293,8 +296,15 @@ describe("getAccountMints", () => {
       },
     ]);
 
+    // How far back the page reached, whatever the last transaction was, and where the node's history
+    // starts (XRPL-027).
+    expect(first.oldestScanned).toEqual({ ledgerIndex: 880, closeTime: "2026-11-20T20:10:00Z" });
+    expect(first.earliestLedger).toBe(100);
+
     const second = await service.getAccountMints(ISSUER, { cursor: first.nextCursor as string });
     expect(second.nextCursor).toBeNull();
+    expect(second.earliestLedger).toBeNull(); // the node didn't say
+    expect(second.oldestScanned).toEqual({ ledgerIndex: 900, closeTime: "2026-11-20T20:12:20Z" });
     expect(second.items).toEqual([
       expect.objectContaining({ hash: FAILED_HASH, succeeded: false, nftokenId: null, memos: [] }),
     ]);

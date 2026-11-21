@@ -26,8 +26,10 @@ export type MappingDeps = Pick<MintDeps, "db" | "ledger" | "config">;
 /** Pages of 400 transactions read per issuer and run: the most recent 4,000. */
 const MAX_HISTORY_PAGES = 10;
 const HISTORY_PAGE_SIZE = 400;
+/** Pages read when looking for one ticket's recent mint (XRPL-027): up to the most recent 1,200 transactions. */
+const TICKET_SEARCH_PAGES = 3;
 
-type Outcome =
+export type LedgerMintOutcome =
   | { kind: "other-event" }
   | { kind: "matched" }
   | { kind: "recorded" }
@@ -119,6 +121,57 @@ export async function reconcileEventMappings(
   };
 }
 
+/**
+ * Looks for a validated mint naming `ticketId` (in its ticket memo) in `issuer`'s history, newest first
+ * (XRPL-027). `searched` says whether a missing mint is proof there was none:
+ *
+ * - yes, once the search has read a transaction older than `since`, of any type: everything newer than
+ *   the request has then been read;
+ * - yes, when the account has nothing older and the node's history starts at or before `fromLedger`, a
+ *   ledger from before the request;
+ * - no otherwise: the node keeps too little history to tell (`fromLedger` null means it can't be
+ *   judged), or more than 1,200 of the issuer's transactions are newer than the request.
+ */
+export async function findTicketMint(
+  deps: MappingDeps,
+  args: { ticketId: string; issuer: string; since: Date; fromLedger: number | null },
+): Promise<{ mint: LedgerMint | null; searched: boolean }> {
+  let cursor: string | undefined;
+  for (let page = 0; page < TICKET_SEARCH_PAGES; page += 1) {
+    const batch = await deps.ledger().getAccountMints(args.issuer, { cursor, limit: HISTORY_PAGE_SIZE });
+    const mint = batch.items.find((m) => m.succeeded && m.nftokenId && ticketIdFromMint(m) === args.ticketId);
+    if (mint) return { mint, searched: true };
+    const oldest = batch.oldestScanned?.closeTime ?? null;
+    if (oldest !== null && new Date(oldest) < args.since) return { mint: null, searched: true };
+    if (!batch.nextCursor) {
+      // The account has nothing older in this node's history. That rules a mint out only if the
+      // history reaches back before the request: a node that keeps less would simply not show it.
+      const covered =
+        args.fromLedger !== null && batch.earliestLedger !== null && batch.earliestLedger <= args.fromLedger;
+      return { mint: null, searched: covered };
+    }
+    cursor = batch.nextCursor;
+  }
+  return { mint: null, searched: false };
+}
+
+/**
+ * Records a validated mint found for one ticket, with the same checks and exactly-once claim as the
+ * ledger check (XRPL-027). Disagreements come back as an issue, and nothing is changed for them.
+ */
+export async function recordTicketMint(
+  deps: MappingDeps,
+  ticket: Pick<TicketNFT, "id" | "eventId">,
+  mint: LedgerMint,
+): Promise<LedgerMintOutcome> {
+  return applyLedgerMint(deps, {
+    eventId: ticket.eventId,
+    taxon: ticketTaxon(ticket.eventId),
+    ticketId: ticket.id,
+    mint,
+  });
+}
+
 function issueFor(
   problem: MintMappingProblem,
   detail: string,
@@ -139,7 +192,7 @@ function issueFor(
 async function applyLedgerMint(
   deps: MappingDeps,
   args: { eventId: string; taxon: number; ticketId: string; mint: LedgerMint },
-): Promise<Outcome> {
+): Promise<LedgerMintOutcome> {
   const { eventId, taxon, ticketId, mint } = args;
   const ticket = await deps.db.ticketNFT.findUnique({ where: { id: ticketId } });
   if (!ticket) {
@@ -193,7 +246,11 @@ async function applyLedgerMint(
 }
 
 /** Records a validated mint the app missed: ticket MINTED, ledger record applied, tier count +1. */
-async function recordLedgerMint(deps: MappingDeps, ticket: TicketNFT, mint: LedgerMint): Promise<Outcome> {
+async function recordLedgerMint(
+  deps: MappingDeps,
+  ticket: TicketNFT,
+  mint: LedgerMint,
+): Promise<LedgerMintOutcome> {
   const nftokenId = mint.nftokenId as string;
   const holding = await deps.ledger().verifyOwner(nftokenId, mint.issuer);
   const now = new Date();

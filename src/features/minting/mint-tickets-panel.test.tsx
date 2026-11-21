@@ -33,9 +33,13 @@ function ticket(serial: number, extra: Partial<MintTicketView> = {}): MintTicket
     nftExplorerUrl: null,
     mintTxExplorerUrl: null,
     primaryOffer: null,
+    mintFailure: null,
     ...extra,
   };
 }
+
+const failed = (serial: number, mintFailure: MintTicketView["mintFailure"]) =>
+  ticket(serial, { mintStatus: "FAILED", mintFailure });
 
 const minted = (serial: number) =>
   ticket(serial, {
@@ -116,11 +120,14 @@ function mockApi({
   listings,
   mint,
   status = {},
+  requestExtra = {},
   reconcile = () => json(report()),
 }: {
   listings: EventMints[];
   mint?: (n: number) => Response;
   status?: Record<number, TransactionRequest["status"]>;
+  /** Extra fields of polled request n, e.g. a failure's engine result. */
+  requestExtra?: Record<number, Partial<TransactionRequest>>;
   reconcile?: () => Response;
 }) {
   const lists = [...listings];
@@ -153,7 +160,7 @@ function mockApi({
     const polled = /^\/api\/wallet\/transaction-requests\/.+-(\d{12})$/.exec(url);
     if (polled) {
       const n = Number(polled[1]);
-      return json(txRequest(n, status[n] ?? "CONFIRMED"));
+      return json({ ...txRequest(n, status[n] ?? "CONFIRMED"), ...requestExtra[n] });
     }
     throw new Error(`unexpected ${method} ${url}`);
   });
@@ -222,7 +229,9 @@ describe("MintTicketsPanel", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
 
     expect(
-      await screen.findByText("You declined the last ticket in Xaman, so minting stopped."),
+      await screen.findByText(
+        "You declined the last ticket in Xaman, so minting stopped. Minting again retries the same ticket.",
+      ),
     ).toBeVisible();
     expect(screen.getByText("1 of 3 minted")).toBeVisible();
     await new Promise((resolve) => setTimeout(resolve, 30)); // a few more poll intervals
@@ -298,6 +307,125 @@ describe("MintTicketsPanel", () => {
     // Failed tickets get reused, so they still count as left to mint: 10 - 1 minted - 2 pending.
     expect(screen.getByRole("button", { name: "Mint all 7 remaining" })).toBeEnabled();
   });
+
+  it("says why each failed ticket has no NFT, and retries the first one next (XRPL-027)", async () => {
+    const at = "2026-11-21T10:00:00.000Z";
+    const failedTx = `https://testnet.xrpl.org/transactions/${TX}`;
+    const fetchMock = mockApi({
+      listings: [
+        eventMints(
+          [
+            minted(1),
+            failed(2, { reason: "NOT_APPROVED", resultCode: null, txExplorerUrl: null, at }),
+            failed(3, {
+              reason: "INSUFFICIENT_RESERVE",
+              resultCode: "tecINSUFFICIENT_RESERVE",
+              txExplorerUrl: failedTx,
+              at,
+            }),
+            failed(4, {
+              reason: "LEDGER_REJECTED",
+              resultCode: "tecNO_PERMISSION",
+              txExplorerUrl: failedTx,
+              at,
+            }),
+            failed(5, { reason: "NOT_VALIDATED", resultCode: "tefPAST_SEQ", txExplorerUrl: null, at }),
+            failed(6, { reason: "REQUEST_FAILED", resultCode: null, txExplorerUrl: null, at }),
+          ],
+          1,
+          10,
+        ),
+      ],
+      mint: () => json({ ticket: ticket(2), request: txRequest(2, "PENDING"), metadataPublic: true }, 201),
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+
+    const list = await screen.findByRole("list", { name: "General Admission: failed tickets" });
+    const row = (serial: number) => within(list).getByText(`#${serial}`).closest("li") as HTMLElement;
+    expect(row(2)).toHaveTextContent(
+      "Not approved in Xaman (declined, cancelled or expired). Nothing was sent.",
+    );
+    expect(row(3)).toHaveTextContent(
+      "the wallet didn't hold enough XRP for the reserve a new NFT page needs (tecINSUFFICIENT_RESERVE). The small fee was charged.",
+    );
+    expect(row(4)).toHaveTextContent(
+      "Rejected by the XRP Ledger (tecNO_PERMISSION). The small fee was charged.",
+    );
+    expect(row(5)).toHaveTextContent("Signed, but never validated (tefPAST_SEQ). Nothing was charged.");
+    expect(row(6)).toHaveTextContent("The approval request didn't go through, so nothing was sent.");
+    expect(within(row(3)).getByRole("link", { name: "Failed transaction" })).toHaveAttribute(
+      "href",
+      failedTx,
+    );
+    expect(within(row(2)).queryByRole("link", { name: "Failed transaction" })).toBeNull();
+    expect(screen.getByText(/The next mint retries them first, keeping their numbers/)).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry #2" }));
+    expect(await screen.findByText(/Approve the mint: General Admission #2/)).toBeVisible();
+    expect(mintPosts(fetchMock)).toHaveLength(1);
+  });
+
+  it("says when the wallet can't cover the reserve a mint needs (XRPL-027)", async () => {
+    const message =
+      "Not enough XRP to mint: a ticket can need 0.2 XRP of your wallet's reserve for a new NFT page, plus the network fee, and this wallet has 0.05 XRP spare. Add XRP to the wallet and try again.";
+    mockApi({
+      listings: [eventMints([], 0, 3)],
+      mint: () =>
+        json({ error: { code: "CONFLICT", message, details: { reason: "INSUFFICIENT_RESERVE" } } }, 409),
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByText("0 of 3 minted")).toBeVisible();
+  });
+
+  it("stops a run the ledger rejected for want of reserve, and says how to go on (XRPL-027)", async () => {
+    const fetchMock = mockApi({
+      listings: [eventMints([], 0, 3)],
+      status: { 1: "FAILED" },
+      requestExtra: {
+        1: { txHash: TX, failureReason: "LEDGER_REJECTED", engineResult: "tecINSUFFICIENT_RESERVE" },
+      },
+    });
+    render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Mint all 3 remaining" }));
+
+    expect(
+      await screen.findByText(
+        "The XRP Ledger rejected the last mint: your wallet doesn't hold enough XRP for the reserve it needs (tecINSUFFICIENT_RESERVE), so minting stopped. Add XRP to the wallet first. Minting again retries the same ticket.",
+      ),
+    ).toBeVisible();
+    expect(mintPosts(fetchMock)).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      { failureReason: "LEDGER_REJECTED", engineResult: "tecNO_PERMISSION", txHash: TX },
+      "The XRP Ledger rejected the last mint (tecNO_PERMISSION) and charged the small network fee, so minting stopped. Minting again retries the same ticket.",
+    ],
+    [
+      { failureReason: "NETWORK_REJECTED", engineResult: "tefMAX_LEDGER", txHash: TX },
+      "The network refused the last mint (tefMAX_LEDGER), so minting stopped. Nothing was charged. Minting again retries the same ticket.",
+    ],
+    [
+      { failureReason: "NOT_VALIDATED_IN_TIME", txHash: TX },
+      "The last mint wasn't validated before it expired, so minting stopped. Nothing was charged. Minting again retries the same ticket.",
+    ],
+    [
+      { failureReason: "WRONG_NETWORK" },
+      "The last mint was signed on a different network, so minting stopped. Switch Xaman to XRPL Testnet first. Minting again retries the same ticket.",
+    ],
+  ] as const)(
+    "says in plain words why a failed mint stopped the run: %o (XRPL-027)",
+    async (extra, message) => {
+      mockApi({ listings: [eventMints([], 0, 2)], status: { 1: "FAILED" }, requestExtra: { 1: extra } });
+      render(<MintTicketsPanel eventId={EVENT} issuerAddress={ISSUER} pollIntervalMs={5} />);
+      await userEvent.click(await screen.findByRole("button", { name: "Mint next ticket" }));
+
+      expect(await screen.findByText(message)).toBeVisible();
+    },
+  );
 
   it("asks for a proven wallet before minting", async () => {
     mockApi({ listings: [eventMints([])] });

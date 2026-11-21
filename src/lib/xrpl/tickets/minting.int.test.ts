@@ -116,10 +116,30 @@ function deps(state: { request: TransactionRequest; nftokenId?: string; uri?: st
       fetchedAt: "",
     },
   }));
+  // Minting checks the issuer can cover a new NFT page's reserve (XRPL-027): a funded wallet.
+  const getAccountInfo = vi.fn(async (address: string) => ({
+    address,
+    exists: true,
+    balanceDrops: "100000000",
+    sequence: 1,
+    ownerCount: 0,
+    provenance: {
+      endpoint: "wss://node",
+      ledgerIndex: 1235,
+      ledgerHash: null,
+      validated: true,
+      fetchedAt: "",
+    },
+  }));
+  const getReserves = vi.fn(async () => ({ baseDrops: "1000000", incrementDrops: "200000" }));
+  // Each mint's LastLedgerSequence is set past the validated ledger (XRPL-027).
+  const getNetworkStatus = vi.fn(async () => ({
+    validatedLedger: { index: 1000, hash: "H", ageSeconds: 1 },
+  }));
   const mintDeps: MintDeps = {
     db,
     transactions: () => ({ create, get }) as never,
-    ledger: () => ({ getValidatedTx, verifyOwner }) as never,
+    ledger: () => ({ getValidatedTx, verifyOwner, getAccountInfo, getReserves, getNetworkStatus }) as never,
     config: { network: "TESTNET", explorerUrl: "https://testnet.xrpl.org" },
     baseUrl: "http://localhost:3000",
   };
