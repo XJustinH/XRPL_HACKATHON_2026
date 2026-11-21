@@ -84,6 +84,7 @@ function lookup(overrides: Partial<LedgerTxLookup>): LedgerTxLookup {
     closeTime: "2026-11-20T19:01:00Z",
     nftokenId: null,
     offerIndex: null,
+    acceptedSellOfferIndex: null,
     explorerUrl: EXPLORER,
     provenance: {
       endpoint: "wss://node",

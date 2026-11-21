@@ -155,4 +155,14 @@ describe("PublishPanel", () => {
     );
     expect(screen.getByText("1 ticket minted")).toBeVisible();
   });
+
+  it("picks up a tier added after the page loaded, without a reload", () => {
+    // The tier manager adds a tier, then router.refresh() re-renders the page with the new event.
+    const { rerender } = render(<PublishPanel event={event({ tiers: [] })} />);
+    expect(screen.getByRole("button", { name: "Publish event" })).toBeDisabled();
+
+    rerender(<PublishPanel event={event()} />);
+
+    expect(screen.getByRole("button", { name: "Publish event" })).toBeEnabled();
+  });
 });

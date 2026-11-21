@@ -307,7 +307,7 @@ async function applyPurchase(
       if (offer.kind === "PRIMARY") {
         await tx.ticketNFT.updateMany({
           where: { id: offer.ticketId, primarySoldAt: null },
-          data: { primarySoldAt: soldAt, ...owner },
+          data: { primarySoldAt: soldAt, primarySaleTxHash: confirmed.hash, ...owner },
         });
       } else {
         // A resale, private sale or gift moves the ticket to its new owner; the primary sale stays as it was.

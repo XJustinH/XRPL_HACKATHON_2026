@@ -140,6 +140,7 @@ function deps(world: World, extra: { resalePolicy?: PurchaseDeps["resalePolicy"]
       account: HOLDER,
       nftokenId: NFT,
       offerIndex: OFFER_INDEX,
+      acceptedSellOfferIndex: null,
       explorerUrl: `https://testnet.xrpl.org/transactions/${h}`,
       ...world.confirmed,
     }),

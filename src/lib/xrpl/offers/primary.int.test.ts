@@ -141,6 +141,7 @@ function deps(state: LedgerState) {
     account: SELLER,
     nftokenId: null,
     offerIndex: OFFER_INDEX,
+    acceptedSellOfferIndex: null,
     explorerUrl: `https://testnet.xrpl.org/transactions/${hash}`,
   }));
   const verifyOwner = vi.fn(async (nftokenId: string, address: string) => ({

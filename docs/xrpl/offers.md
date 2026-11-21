@@ -106,7 +106,8 @@ amount and the wallet's readiness (Agent C, XRPL-030). When the wallet is ready,
 | Failed, and the offer is gone from the ledger (bought or withdrawn elsewhere) | `STALE` | unchanged | `VALIDATED_FAILURE` |
 
 Effects apply once (`appliedAt`). Agent A's inventory (XRPL-020) counts the ticket as sold from
-`primarySoldAt`. Reconciling sales made outside the app is XRPL-032.
+`primarySoldAt`, and the ticket stores the sale's hash in `primarySaleTxHash`. Sales made outside the app are
+recorded from their tx hash by Agent A's `POST /api/ledger/transactions/:hash/reconcile` (XRPL-032).
 
 Verified on XRPL Testnet (20 Nov 2026): a dev buyer wallet bought the ticket listed above through the server
 path, signing exactly the transaction the server built:
@@ -122,8 +123,9 @@ Limitations:
 - One ticket per purchase. Choosing a quantity is part of Agent C's ticket selection (XRPL-019).
 - A hold lasts until the buyer's Xaman request settles (it expires after 10 minutes unopened), so an
   abandoned purchase blocks that one ticket for up to 10 minutes.
-- A sale made straight from the ledger with another wallet app is not recorded until XRPL-032's
-  reconciliation. The offer is marked `STALE` the next time anyone tries to buy it in the app.
+- A sale made straight from the ledger with another wallet app is recorded once its transaction hash is
+  reconciled (`POST /api/ledger/transactions/:hash/reconcile`, XRPL-032). Until then the offer is marked
+  `STALE` the next time anyone tries to buy it in the app.
 
 ## Holder offers: resale, private sale, gift (XRPL-036, 039, 040, 041)
 
