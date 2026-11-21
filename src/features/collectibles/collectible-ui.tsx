@@ -80,7 +80,8 @@ export function tokenStatusLabel(token: CollectibleTokenView): string {
   return "Not minted yet";
 }
 
-const externalLink = "text-accent underline";
+/* 24px tall: these small links sit side by side, and a thumb has to hit the right one (WCAG 2.5.8). */
+const externalLink = "inline-flex min-h-6 items-center text-accent underline";
 
 /** On-chain proof for a minted edition: the NFT ID and explorer links. */
 export function TokenProof({ token }: { token: CollectibleTokenView }) {
