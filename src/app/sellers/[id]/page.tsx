@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { safeExternalUrl, type SellerProfile } from "@/contracts";
-import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
+import { SellerCollectiblesSection } from "@/features/collectibles/sections";
 import { EventCard } from "@/features/events/event-card";
 import { SellerMerchSection } from "@/features/commerce/seller-merch-section";
 import { SellerPostsFeed } from "@/features/community/seller-posts-feed";
@@ -206,15 +206,8 @@ export default async function SellerStorefrontPage({
       {/* Published physical merchandise (XRPL-065/066). Renders its own "Merchandise" section. */}
       <SellerMerchSection sellerId={profile.id} />
 
-      <section aria-labelledby="collectibles-heading" className="mt-10">
-        <h2 id="collectibles-heading" className="mb-4 text-lg font-semibold">
-          Digital collectibles
-        </h2>
-        <NotImplementedNotice
-          title="Digital collectibles"
-          blockedBy="XRPL-070 to XRPL-074 (digital collectibles)"
-        />
-      </section>
+      {/* Published digital collectibles (XRPL-072). Renders nothing when the seller has none. */}
+      <SellerCollectiblesSection sellerId={profile.id} />
     </>
   );
 }

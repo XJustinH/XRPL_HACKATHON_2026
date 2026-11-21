@@ -22,6 +22,8 @@ export const primaryNav: NavItem[] = [
   { href: "/resale", label: "Resale" },
   { href: "/tickets", label: "My tickets", requiresSession: true },
   { href: "/wishlist", label: "Wishlist", requiresSession: true },
+  // Digital collectibles (XRPL-072 to XRPL-075): browse them, and see the ones your wallet holds.
+  { href: "/collectibles", label: "Collectibles" },
   {
     href: "/seller/events",
     label: "Manage events",
@@ -49,6 +51,13 @@ export const accountNav: NavItem[] = [
   {
     href: "/seller/products",
     label: "Merchandise",
+    roles: ["SELLER", "ORGANISER"],
+    requiresSession: true,
+  },
+  // Digital collectibles (XRPL-070 to XRPL-074): upload media, publish, mint and list editions.
+  {
+    href: "/seller/collectibles",
+    label: "Sell collectibles",
     roles: ["SELLER", "ORGANISER"],
     requiresSession: true,
   },
