@@ -55,6 +55,11 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
 
   const items = visibleNavItems(primaryNav, session);
   const account = visibleNavItems(accountNav, session);
+  /*
+   * Account links live only in the menu, so the menu must be reachable at every width once
+   * there are any. Without them, wide screens need no menu: the primary links are in the bar.
+   */
+  const menuOnWideScreens = account.length > 0;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-canvas/95 backdrop-blur-sm">
@@ -69,7 +74,8 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
           >
             XT
           </span>
-          <span className="hidden sm:inline">XRPL Tickets</span>
+          {/* Hidden from sight on phones, never from screen readers: it is the link's only name. */}
+          <span className="sr-only sm:not-sr-only">XRPL Tickets</span>
         </Link>
 
         <nav aria-label="Primary" className="ml-2 hidden flex-1 md:block">
@@ -123,7 +129,9 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
             onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
             aria-controls={menuId}
-            className="grid size-10 place-items-center rounded-lg border border-border md:hidden"
+            className={`grid size-11 place-items-center rounded-lg border border-border ${
+              menuOnWideScreens ? "" : "md:hidden"
+            }`}
           >
             <span className="sr-only">
               {menuOpen ? "Close main menu" : "Open main menu"}
@@ -148,13 +156,17 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
       </div>
 
       {menuOpen ? (
-        <div id={menuId} className="border-t border-border bg-canvas md:hidden">
-          <nav aria-label="Mobile" className="mx-auto w-full max-w-6xl px-4 py-3">
+        <div
+          id={menuId}
+          className={`border-t border-border bg-canvas ${menuOnWideScreens ? "" : "md:hidden"}`}
+        >
+          <nav aria-label="Menu" className="mx-auto w-full max-w-6xl px-4 py-3">
             <ul className="flex flex-col gap-1">
               {[...items, ...account].map((item) => {
                 const active = isActiveHref(item.href, pathname);
                 return (
-                  <li key={item.href}>
+                  // Primary links are already in the bar on wide screens.
+                  <li key={item.href} className={items.includes(item) ? "md:hidden" : undefined}>
                     <Link
                       href={item.href}
                       aria-current={active ? "page" : undefined}

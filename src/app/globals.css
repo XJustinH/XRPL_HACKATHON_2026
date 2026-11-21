@@ -54,7 +54,13 @@
 }
 
 html {
-  color-scheme: light dark;
+  /*
+   * The dark palette above is what every device gets: Tailwind lifts a nested `@theme` out of its
+   * media query, so those values always win. Say so to the browser. With `light dark` here, a
+   * phone in light mode drew its own controls for a light page on this dark one, e.g. a black
+   * calendar icon on the black date field.
+   */
+  color-scheme: dark;
   -webkit-text-size-adjust: 100%;
 }
 
