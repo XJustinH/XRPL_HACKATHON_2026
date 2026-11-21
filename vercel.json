@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm ci",
-  "buildCommand": "bash scripts/deploy/vercel-build.sh"
+  "buildCommand": "bash scripts/deploy/vercel-build.sh",
+  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
 }
