@@ -116,6 +116,11 @@ function outcomeOf(request: TransactionRequest): { tone: "caution" | "critical";
             tone: "critical",
             text: `Your wallet signed on a different network. Switch Xaman to ${NETWORK_LABEL} and try again.`,
           };
+        case "WRONG_WALLET":
+          return {
+            tone: "critical",
+            text: "A different account signed this in Xaman, so it wasn't accepted. Switch Xaman to your connected wallet and try again.",
+          };
         default:
           return { tone: "critical", text: "The transaction failed." };
       }

@@ -176,6 +176,8 @@ function stopReason(kind: Run["kind"], request: TransactionRequest): string {
           return `The last ${noun} wasn't validated before it expired, so ${verb} stopped. Nothing was charged.${retry}`;
         case "WRONG_NETWORK":
           return `The last ${noun} was signed on a different network, so ${verb} stopped. Switch Xaman to ${NETWORK_LABEL} first.${retry}`;
+        case "WRONG_WALLET":
+          return `The last ${noun} was signed by a different account in Xaman, so it wasn't accepted and ${verb} stopped. Switch Xaman to your issuing wallet first.${retry}`;
         default:
           return `The last ${noun} did not go through (${code}), so ${verb} stopped.${retry}`;
       }

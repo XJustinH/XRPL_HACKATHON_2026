@@ -161,7 +161,12 @@ describe("WalletTransactionRequests.create", () => {
     const [input] = xaman.createPayload.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(input).toEqual({
       txjson: TEST_TX,
-      options: { submit: true, expire: TRANSACTION_REQUEST_EXPIRY_MINUTES, force_network: "TESTNET" },
+      options: {
+        submit: true,
+        expire: TRANSACTION_REQUEST_EXPIRY_MINUTES,
+        force_network: "TESTNET",
+        signers: [ACCOUNT],
+      },
       custom_meta: { instruction: "Developer check", blob: { purpose: "TEST", reference: "ticket-1" } },
     });
     expect(TransactionRequest.parse(request)).toMatchObject({
@@ -340,6 +345,18 @@ describe("WalletTransactionRequests.get", () => {
     const { ledger, service } = setup(signed({ environment_nodetype: "MAINNET" }));
     expect(await service.get(UUID)).toMatchObject({ status: "FAILED", failureReason: "WRONG_NETWORK" });
     expect(ledger.getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a transaction another account signed, even when the ledger validated it", async () => {
+    const { service } = setup(
+      signed({ account: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh" }),
+      { tx: lookup({ account: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh" }) },
+    );
+    expect(await service.get(UUID)).toMatchObject({
+      status: "FAILED",
+      failureReason: "WRONG_WALLET",
+      txHash: TX_HASH,
+    });
   });
 
   it("treats a signed request without a transaction ID yet as SUBMITTED", async () => {

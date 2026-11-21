@@ -131,6 +131,9 @@ export class WalletTransactionRequests {
         submit: true,
         expire: TRANSACTION_REQUEST_EXPIRY_MINUTES,
         force_network: this.config.network,
+        // Only the named account may sign: Xaman would otherwise offer every account in the app,
+        // and a ticket minted by another one lands in a wallet that cannot sell it.
+        signers: [input.txjson.Account],
       },
       custom_meta: { instruction, blob: { purpose, reference } },
     });
@@ -222,6 +225,10 @@ export class WalletTransactionRequests {
 
     const walletNetwork = result.response.environment_nodetype ?? result.meta.force_network ?? null;
     if (walletNetwork !== this.config.network) return fail("WRONG_NETWORK");
+    // The signer is checked here as well as restricted in Xaman, so the rule doesn't rest on the
+    // wallet app alone. The transaction may have validated: it still isn't what was asked for.
+    const signer = result.response.account ?? null;
+    if (signer !== null && signer !== base.account) return fail("WRONG_WALLET");
     if (!txHash) return { ...signed, status: "SUBMITTED" };
 
     let lookup: Awaited<ReturnType<LedgerReader["getTransaction"]>>;

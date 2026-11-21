@@ -390,12 +390,15 @@ export const FINAL_TRANSACTION_REQUEST_STATUSES: readonly TransactionRequestStat
  * - NETWORK_REJECTED: refused before reaching a ledger ("tem" or "tef" results). Nothing was charged.
  * - NOT_VALIDATED_IN_TIME: its LastLedgerSequence passed without validation. Nothing was charged.
  * - WRONG_NETWORK: the wallet signed on a different network than the app uses.
+ * - WRONG_WALLET: an account other than the one the request named signed it. Whatever that
+ *   transaction did on the ledger, it is not the action the app asked for and is never recorded as it.
  */
 export const TransactionFailureReason = z.enum([
   "LEDGER_REJECTED",
   "NETWORK_REJECTED",
   "NOT_VALIDATED_IN_TIME",
   "WRONG_NETWORK",
+  "WRONG_WALLET",
 ]);
 export type TransactionFailureReason = z.infer<typeof TransactionFailureReason>;
 
