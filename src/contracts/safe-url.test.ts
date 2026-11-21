@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { HttpUrl, OptionalHttpUrl, safeExternalUrl } from "./events";
+import { HttpUrl, OptionalHttpUrl, safeExternalUrl } from "./common";
 import { EventDraftInput, SellerProfilePatch, SocialLink } from "./events";
 
 /**
