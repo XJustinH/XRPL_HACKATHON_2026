@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { type EventReviews as EventReviewsData, REVIEW_BODY_MAX, type ReviewView } from "@/contracts/reviews";
+import { ReportButton } from "@/features/community/report-button";
 
 type Load = { kind: "loading" } | { kind: "ready"; data: EventReviewsData } | { kind: "error"; message: string };
 
@@ -92,7 +93,8 @@ function ReviewsBody({ data, eventId, onSaved }: { data: EventReviewsData; event
       ) : (
         <ul className="mt-4 divide-y divide-border" aria-label="Reviews">
           {data.reviews.map((r) => (
-            <ReviewItem key={r.id} review={r} />
+            // Signed-in viewers can report someone else's review (XRPL-083); the server checks again.
+            <ReviewItem key={r.id} review={r} canReport={viewer.status !== "NOT_SIGNED_IN" && r.id !== own?.id} />
           ))}
         </ul>
       )}
@@ -100,7 +102,7 @@ function ReviewsBody({ data, eventId, onSaved }: { data: EventReviewsData; event
   );
 }
 
-function ReviewItem({ review }: { review: ReviewView }) {
+function ReviewItem({ review, canReport }: { review: ReviewView; canReport: boolean }) {
   return (
     <li className="py-3">
       <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
@@ -112,6 +114,7 @@ function ReviewItem({ review }: { review: ReviewView }) {
         </span>
       </p>
       {review.body ? <p className="mt-1 whitespace-pre-line text-sm">{review.body}</p> : null}
+      {canReport ? <ReportButton targetType="REVIEW" targetId={review.id} /> : null}
     </li>
   );
 }
