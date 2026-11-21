@@ -27,14 +27,15 @@ const HEADLINE_ID = DEMO_IDS.events.headlineShow;
 const HEADLINE = demoEvents.find((e) => e.id === HEADLINE_ID)?.title as string;
 const HOLDER_WALLET = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
 
-test.beforeAll(() => {
-  const url = process.env.TEST_DATABASE_URL ?? "";
-  // A listed ticket for the checkout, and a checked-in one so the organiser's chart has data.
+/** A listed ticket for the checkout, and a checked-in one so the organiser's screens have data. */
+function addTicketFixtures(): void {
   execSync("npx tsx tests/e2e/ticket-fixtures.ts", {
     stdio: "inherit",
-    env: { ...process.env, DATABASE_URL: url },
+    env: { ...process.env, DATABASE_URL: process.env.TEST_DATABASE_URL ?? "" },
   });
-});
+}
+
+test.beforeAll(addTicketFixtures);
 
 /**
  * The page fits the screen: nothing is wider than the phone. Measured against the phone's own
@@ -189,6 +190,9 @@ for (const phone of PHONES) {
     });
 
     test("a buyer picks a ticket and reviews the order, or is told why there is none", async ({ page }) => {
+      // List the ticket afresh: where offers are confirmed on the ledger, an earlier run of this
+      // test closed it, because the ledger has never heard of it.
+      addTicketFixtures();
       await signInAs(page, CUSTOMER);
 
       await page.goto(`/events/${HEADLINE_ID}`);
