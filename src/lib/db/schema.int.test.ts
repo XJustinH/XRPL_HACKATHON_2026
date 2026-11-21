@@ -440,3 +440,91 @@ describe("friendships (XRPL-084)", () => {
     expect(await db.userBlock.count()).toBe(0);
   });
 });
+
+describe("physical products (XRPL-064)", () => {
+  const product = (sellerId: string, data: Record<string, unknown> = {}) =>
+    db.physicalProduct.create({ data: { sellerId, name: "Tour shirt", priceDrops: "15000000", ...data } });
+
+  it("stores a draft with no stock, images or description by default", async () => {
+    const { seller } = await seedEvent();
+    expect(await product(seller.id)).toMatchObject({
+      status: "DRAFT",
+      stock: 0,
+      imageUrls: [],
+      description: "",
+      eventId: null,
+      publishedAt: null,
+    });
+  });
+
+  it.each(["0", "-1", "1.5", "01", "", "1" + "0".repeat(18)])("rejects priceDrops %j", async (priceDrops) => {
+    const { seller } = await seedEvent();
+    await expect(product(seller.id, { priceDrops })).rejects.toThrow(/PhysicalProduct_priceDrops_positive/);
+  });
+
+  it("never lets stock go negative", async () => {
+    const { seller } = await seedEvent();
+    const { id } = await product(seller.id, { stock: 2 });
+    // The store's atomic adjustment: no row matches when there isn't enough stock.
+    const taken = await db.physicalProduct.updateMany({
+      where: { id, stock: { gte: 3 } },
+      data: { stock: { decrement: 3 } },
+    });
+    expect(taken.count).toBe(0);
+    await expect(db.physicalProduct.update({ where: { id }, data: { stock: { decrement: 3 } } })).rejects.toThrow(
+      /PhysicalProduct_stock_nonnegative/,
+    );
+    expect((await db.physicalProduct.findUniqueOrThrow({ where: { id } })).stock).toBe(2);
+  });
+
+  it("allows at most 6 images, and never a missing list", async () => {
+    const { seller } = await seedEvent();
+    const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://img.example/${i}.jpg`);
+    expect((await product(seller.id, { imageUrls: urls(6) })).imageUrls).toHaveLength(6);
+    await expect(product(seller.id, { name: "Poster", imageUrls: urls(7) })).rejects.toThrow(
+      /PhysicalProduct_images_limit/,
+    );
+    const { id } = await product(seller.id, { name: "Mug" });
+    await expect(
+      db.$executeRawUnsafe(`UPDATE "PhysicalProduct" SET "imageUrls" = NULL WHERE "id" = $1::uuid`, id),
+    ).rejects.toThrow(/imageUrls/);
+  });
+
+  it("needs a publish date once published", async () => {
+    const { seller } = await seedEvent();
+    const { id } = await product(seller.id);
+    await expect(db.physicalProduct.update({ where: { id }, data: { status: "PUBLISHED" } })).rejects.toThrow(
+      /PhysicalProduct_published_has_date/,
+    );
+    const published = await db.physicalProduct.update({
+      where: { id },
+      data: { status: "PUBLISHED", publishedAt: new Date() },
+    });
+    expect(published.status).toBe("PUBLISHED");
+  });
+
+  it("links only to the seller's own events, and unlinks when the event is deleted", async () => {
+    const { seller, event } = await seedEvent();
+    const { event: otherEvent } = await seedEvent();
+
+    const shirt = await product(seller.id, { eventId: event.id });
+    expect(shirt.eventId).toBe(event.id);
+    await expect(product(seller.id, { name: "Poster", eventId: otherEvent.id })).rejects.toThrow(
+      /PhysicalProduct_event_same_seller/,
+    );
+    await expect(
+      db.physicalProduct.update({ where: { id: shirt.id }, data: { eventId: otherEvent.id } }),
+    ).rejects.toThrow(/PhysicalProduct_event_same_seller/);
+
+    await db.event.delete({ where: { id: event.id } });
+    expect((await db.physicalProduct.findUniqueOrThrow({ where: { id: shirt.id } })).eventId).toBeNull();
+  });
+
+  it("keeps a seller who has products from being deleted", async () => {
+    // No events, so only the product can block the delete.
+    const seller = await db.user.create({ data: { displayName: "Merch only", role: "SELLER" } });
+    await product(seller.id);
+    await expect(db.user.delete({ where: { id: seller.id } })).rejects.toMatchObject({ code: "P2003" });
+    expect(await db.physicalProduct.count()).toBe(1);
+  });
+});
