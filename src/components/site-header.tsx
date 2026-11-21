@@ -4,17 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import type { UserRole } from "@/contracts";
-import {
-  accountNav,
-  isActiveHref,
-  primaryNav,
-  visibleNavItems,
-} from "@/components/nav-config";
+import { isActiveHref, menuGroups, primaryNav, visibleNavItems } from "@/components/nav-config";
+import { SignOutButton } from "@/features/onboarding/sign-out-button";
 
 export type HeaderSession = {
   displayName: string;
   role: UserRole;
   walletAddress: string | null;
+};
+
+const ROLE_NAME: Record<UserRole, string> = {
+  CUSTOMER: "Customer",
+  SELLER: "Seller",
+  ORGANISER: "Organiser",
 };
 
 /** Shortens an XRPL address for display without hiding its identity entirely. */
@@ -54,12 +56,14 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
   }, [menuOpen]);
 
   const items = visibleNavItems(primaryNav, session);
-  const account = visibleNavItems(accountNav, session);
+  const groups = menuGroups(session);
   /*
    * Account links live only in the menu, so the menu must be reachable at every width once
    * there are any. Without them, wide screens need no menu: the primary links are in the bar.
+   * The bar is 72rem at most, so it only holds the primary links from `lg` up, and the account
+   * box beside them from `xl`: below that they would run into each other.
    */
-  const menuOnWideScreens = account.length > 0;
+  const menuOnWideScreens = groups.some((group) => !group.primary);
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-canvas/95 backdrop-blur-sm">
@@ -78,7 +82,7 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
           <span className="sr-only sm:not-sr-only">XRPL Tickets</span>
         </Link>
 
-        <nav aria-label="Primary" className="ml-2 hidden flex-1 md:block">
+        <nav aria-label="Primary" className="ml-2 hidden min-w-0 flex-1 lg:block">
           <ul className="flex items-center gap-1">
             {items.map((item) => {
               const active = isActiveHref(item.href, pathname);
@@ -87,7 +91,7 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
                   <Link
                     href={item.href}
                     aria-current={active ? "page" : undefined}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                       active
                         ? "bg-accent-soft text-accent"
                         : "text-muted hover:bg-surface hover:text-ink"
@@ -103,24 +107,46 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
 
         <div className="ml-auto flex items-center gap-2">
           {session ? (
-            <Link
-              href="/profile"
-              className="hidden items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface sm:flex"
-            >
-              <span className="font-medium">{session.displayName}</span>
-              {session.walletAddress ? (
-                <span className="font-mono text-xs text-muted">
-                  {truncateAddress(session.walletAddress)}
+            <>
+              {/* Who is signed in, as what, and with which wallet: always in sight on wider screens. */}
+              <Link
+                href="/profile"
+                className="hidden items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface sm:flex lg:hidden xl:flex"
+              >
+                <span className="max-w-28 truncate font-medium">{session.displayName}</span>
+                <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
+                  {ROLE_NAME[session.role]}
                 </span>
-              ) : null}
-            </Link>
+                {session.walletAddress ? (
+                  <span className="font-mono text-xs text-muted">
+                    {truncateAddress(session.walletAddress)}
+                  </span>
+                ) : null}
+              </Link>
+              {session.walletAddress ? null : (
+                <Link
+                  href="/connect"
+                  className="whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
+                >
+                  Connect wallet
+                </Link>
+              )}
+            </>
           ) : (
-            <Link
-              href="/connect"
-              className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
-            >
-              Connect wallet
-            </Link>
+            <>
+              <Link
+                href="/onboarding"
+                className="whitespace-nowrap rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/connect"
+                className="whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
+              >
+                Connect wallet
+              </Link>
+            </>
           )}
 
           <button
@@ -129,8 +155,8 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
             onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
             aria-controls={menuId}
-            className={`grid size-11 place-items-center rounded-lg border border-border ${
-              menuOnWideScreens ? "" : "md:hidden"
+            className={`grid size-11 shrink-0 place-items-center rounded-lg border border-border ${
+              menuOnWideScreens ? "" : "lg:hidden"
             }`}
           >
             <span className="sr-only">
@@ -158,29 +184,79 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
       {menuOpen ? (
         <div
           id={menuId}
-          className={`border-t border-border bg-canvas ${menuOnWideScreens ? "" : "md:hidden"}`}
+          className={`max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-border bg-canvas ${
+            menuOnWideScreens ? "" : "lg:hidden"
+          }`}
         >
-          <nav aria-label="Menu" className="mx-auto w-full max-w-6xl px-4 py-3">
-            <ul className="flex flex-col gap-1">
-              {[...items, ...account].map((item) => {
-                const active = isActiveHref(item.href, pathname);
-                return (
-                  // Primary links are already in the bar on wide screens.
-                  <li key={item.href} className={items.includes(item) ? "md:hidden" : undefined}>
-                    <Link
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={`block rounded-lg px-3 py-3 text-base font-medium ${
-                        active ? "bg-accent-soft text-accent" : "hover:bg-surface"
-                      }`}
+          <div className="mx-auto w-full max-w-6xl px-4 py-4">
+            {session ? (
+              <div className="mb-4 rounded-lg border border-border bg-surface px-3 py-3 text-sm">
+                <p>
+                  Signed in as <span className="font-semibold">{session.displayName}</span>
+                  <span className="text-muted"> · {ROLE_NAME[session.role]}</span>
+                </p>
+                <p className="mt-1 text-muted">
+                  {session.walletAddress ? (
+                    <>
+                      Wallet <span className="font-mono text-xs">{truncateAddress(session.walletAddress)}</span>
+                    </>
+                  ) : (
+                    "No wallet connected yet. You need one to buy, sell or check in."
+                  )}
+                </p>
+              </div>
+            ) : null}
+
+            <nav aria-label="Menu">
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 md:grid-cols-3">
+                {groups.map((group) => {
+                  const headingId = `${menuId}-${group.name.replace(/\s+/g, "-").toLowerCase()}`;
+                  return (
+                    // Primary links are already in the bar on wide screens.
+                    <section
+                      key={group.name}
+                      aria-labelledby={headingId}
+                      className={group.primary ? "lg:hidden" : undefined}
                     >
-                      {item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
+                      <h2 id={headingId} className="px-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                        {group.name}
+                      </h2>
+                      <ul className="mt-1 flex flex-col gap-1">
+                        {group.items.map((item) => {
+                          const active = isActiveHref(item.href, pathname);
+                          return (
+                            <li key={item.href} className={group.primary ? "lg:hidden" : undefined}>
+                              <Link
+                                href={item.href}
+                                aria-current={active ? "page" : undefined}
+                                className={`block rounded-lg px-3 py-3 text-base font-medium ${
+                                  active ? "bg-accent-soft text-accent" : "hover:bg-surface"
+                                }`}
+                              >
+                                {item.label}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            </nav>
+
+            {session ? (
+              <div className="mt-4 flex flex-wrap items-start gap-3 border-t border-border pt-4">
+                <Link
+                  href="/onboarding"
+                  className="rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:bg-surface"
+                >
+                  Switch account
+                </Link>
+                <SignOutButton />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </header>

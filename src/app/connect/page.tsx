@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { WalletConnectPanel } from "@/features/wallet/wallet-connect-panel";
 import { getCurrentSession } from "@/lib/auth/current-session";
+import { ROLE_LABEL } from "@/features/onboarding/roles";
 import { loadXrplConfig } from "@/lib/xrpl";
 import { testTransactionsEnabled } from "@/lib/xrpl/wallet/test-transactions";
 
@@ -33,6 +34,40 @@ export default async function ConnectPage() {
         title="Connect your wallet"
         description="You approve every transaction in your own wallet. This platform never asks for a seed phrase or private key."
       />
+      {/* Which account the wallet will belong to: a wallet stays with the first account that connects it. */}
+      <section
+        aria-labelledby="connect-account-heading"
+        className="mb-6 rounded-card border border-border bg-surface p-5 text-sm"
+      >
+        <h2 id="connect-account-heading" className="text-sm font-semibold">
+          {session ? "Your account" : "You're not signed in"}
+        </h2>
+        {session ? (
+          <>
+            <p className="mt-1">
+              Signed in as <span className="font-semibold">{session.displayName}</span>
+              <span className="text-muted"> · {ROLE_LABEL[session.role]}</span>
+            </p>
+            <p className="mt-2 text-muted">
+              {verifiedWallet
+                ? "The wallet below is linked to this account. Use the same account in Xaman for everything you approve here."
+                : "The wallet you approve with becomes this account's wallet, and it can't be linked to a second account. If Xaman holds several accounts, check which one is shown before you approve."}{" "}
+              <Link href="/onboarding" className="font-medium text-accent underline">
+                Switch account
+              </Link>
+            </p>
+          </>
+        ) : (
+          <p className="mt-1 text-muted">
+            Connecting signs you in as the account that already owns the wallet, or starts a new account for
+            it. To use a demo account with this wallet,{" "}
+            <Link href="/onboarding" className="font-medium text-accent underline">
+              choose the account first
+            </Link>
+            , then come back and connect.
+          </p>
+        )}
+      </section>
       <WalletConnectPanel verifiedWallet={verifiedWallet} testTransactions={testTransactionsEnabled()} />
       {session ? null : (
         <section className="mt-6 flex flex-col gap-3 rounded-card border border-border bg-surface p-5 sm:flex-row sm:items-center sm:justify-between">

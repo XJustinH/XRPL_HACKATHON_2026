@@ -7,6 +7,7 @@ const pathname = vi.hoisted(() => ({ current: "/" }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname.current,
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
 describe("SiteHeader", () => {
@@ -80,19 +81,55 @@ describe("SiteHeader", () => {
     const user = userEvent.setup();
     const { unmount } = render(<SiteHeader session={null} />);
     // Signed out there are no account links, so wide screens need no menu button.
-    expect(screen.getByRole("button", { name: "Open main menu" })).toHaveClass("md:hidden");
+    expect(screen.getByRole("button", { name: "Open main menu" })).toHaveClass("lg:hidden");
     unmount();
 
     render(<SiteHeader session={{ displayName: "Band", role: "SELLER", walletAddress: null }} />);
     const toggle = screen.getByRole("button", { name: "Open main menu" });
-    expect(toggle).not.toHaveClass("md:hidden");
+    expect(toggle).not.toHaveClass("lg:hidden");
     await user.click(toggle);
 
     // Account links exist only in the menu. Primary links are in the bar on wide screens.
     const menu = screen.getByRole("navigation", { name: "Menu" });
-    expect(within(menu).getByRole("link", { name: "Following" }).closest("li")).not.toHaveClass("md:hidden");
+    expect(within(menu).getByRole("link", { name: "Following" }).closest("li")).not.toHaveClass("lg:hidden");
     expect(within(menu).getByRole("link", { name: "Your storefront" })).toBeVisible();
-    expect(within(menu).getByRole("link", { name: "Discover" }).closest("li")).toHaveClass("md:hidden");
+    expect(within(menu).getByRole("link", { name: "Discover" }).closest("li")).toHaveClass("lg:hidden");
+  });
+
+  it("says who is signed in, as what, and whether a wallet is connected", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader session={{ displayName: "Band", role: "SELLER", walletAddress: null }} />);
+    // No wallet yet: the bar offers to connect one, next to the account.
+    expect(screen.getByRole("link", { name: /Band/ })).toHaveTextContent("Seller");
+    expect(screen.getByRole("link", { name: "Connect wallet" })).toHaveAttribute("href", "/connect");
+
+    await user.click(screen.getByRole("button", { name: "Open main menu" }));
+    expect(screen.getByText(/No wallet connected yet/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Switch account" })).toHaveAttribute("href", "/onboarding");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeVisible();
+  });
+
+  it("groups the menu under headings, with the door tools under Selling", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader session={{ displayName: "Band", role: "SELLER", walletAddress: null }} />);
+    await user.click(screen.getByRole("button", { name: "Open main menu" }));
+
+    const menu = screen.getByRole("navigation", { name: "Menu" });
+    const selling = within(menu).getByRole("region", { name: "Selling" });
+    expect(within(selling).getByRole("link", { name: "Door and check-in" })).toHaveAttribute(
+      "href",
+      "/organiser/events",
+    );
+    expect(within(within(menu).getByRole("region", { name: "Account" })).getByRole("link", { name: "Wallet" })).toHaveAttribute(
+      "href",
+      "/connect",
+    );
+    expect(within(menu).getByRole("region", { name: "Your things" })).toBeVisible();
+  });
+
+  it("offers signed-out visitors a way to sign in without a wallet", () => {
+    render(<SiteHeader session={null} />);
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/onboarding");
   });
 
   it("hides seller navigation from customers", () => {
