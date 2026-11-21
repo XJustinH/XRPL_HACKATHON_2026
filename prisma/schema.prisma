@@ -237,24 +237,30 @@ model Event {
 }
 
 model TicketTier {
-  id             String   @id @default(uuid()) @db.Uuid
-  eventId        String   @db.Uuid
-  name           String
-  description    String   @default("")
+  id                String   @id @default(uuid()) @db.Uuid
+  eventId           String   @db.Uuid
+  name              String
+  description       String   @default("")
   /// Integer drops as a decimal string, e.g. "2500000" (= 2.5 XRP).
-  priceDrops     String
-  totalSupply    Int
+  priceDrops        String
+  /// `priceDrops` as a number, for price filters and sorting in queries (XRPL-059): compared as
+  /// strings, "9" > "10". The database keeps it equal to `priceDrops` (trigger
+  /// "TicketTier_price_drops_numeric", CHECK "TicketTier_priceDropsNumeric_matches"): read it, never set it.
+  priceDropsNumeric BigInt   @default(0)
+  totalSupply       Int
   /// Number of tickets with a validated NFTokenMint (MintStatus.MINTED).
-  mintedQuantity Int      @default(0)
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  mintedQuantity    Int      @default(0)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
 
   event   Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
   tickets TicketNFT[]
 
   @@unique([eventId, name])
   @@index([eventId])
+  /// Price filter (XRPL-059): tiers at or below a price.
+  @@index([priceDropsNumeric])
 }
 
 /// One row per intended ticket NFT. The row may exist before the mint is validated

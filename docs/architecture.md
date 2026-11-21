@@ -67,6 +67,7 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | An address belongs to one user per network | `WalletLink @@unique([network, address])` |
 | No over-minting | CHECK `0 <= mintedQuantity <= totalSupply`, `totalSupply > 0` |
 | XRP amounts are integer drops strings | CHECK regex on `priceDrops` / `amountDrops` |
+| A tier's numeric price (`priceDropsNumeric`, for price filters and sorting, XRPL-059) equals `priceDrops` | trigger `TicketTier_price_drops_numeric` sets it; CHECK `TicketTier_priceDropsNumeric_matches` |
 | A `MINTED` ticket has ledger identity | CHECK `nftokenId`, `mintTxHash`, `mintedAt` present |
 | Gifts are zero-price and recipient-bound; private offers name a recipient | CHECK on `NFTOffer` |
 | Retried mutations don't double-apply | `IdempotencyRecord @@unique([scope, route, key])` |
