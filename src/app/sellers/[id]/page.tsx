@@ -7,6 +7,8 @@ import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
 import { EventCard } from "@/features/events/event-card";
 import { organiserBrowseHref } from "@/features/discovery/browse-links";
+import { isFollowing } from "@/features/profiles/follows";
+import { FollowButton } from "@/features/profiles/follow-button";
 import {
   getSellerProfile,
   listSellerStorefrontEvents,
@@ -133,21 +135,37 @@ export default async function SellerStorefrontPage({
     getCurrentSession(),
   ]);
   const isOwnProfile = session?.userId === id;
+  // Only meaningful for a signed-in visitor who is not the seller themselves.
+  const following =
+    session && !isOwnProfile ? await isFollowing(db, session.userId, id).catch(() => false) : false;
 
   return (
     <>
       <ProfileHeader profile={profile} />
 
-      {isOwnProfile ? (
-        <p className="mt-4">
+      <div className="mt-4">
+        {isOwnProfile ? (
           <Link
             href="/seller/profile"
             className="inline-block rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:bg-surface"
           >
             Edit your profile
           </Link>
-        </p>
-      ) : null}
+        ) : session ? (
+          <FollowButton
+            sellerId={profile.id}
+            initialFollowing={following}
+            sellerName={profile.displayName}
+          />
+        ) : (
+          <p className="text-sm text-muted">
+            <Link href="/onboarding" className="font-medium text-accent underline">
+              Sign in
+            </Link>{" "}
+            to follow {profile.displayName} and see their new events.
+          </p>
+        )}
+      </div>
 
       <section aria-labelledby="events-heading" className="mt-10">
         <div className="flex flex-wrap items-center justify-between gap-2">
