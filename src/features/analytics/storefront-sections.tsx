@@ -20,7 +20,7 @@ import { formatDropsAsXrp } from "@/lib/xrpl/format";
 const xrp = (drops: string) => `${formatDropsAsXrp(drops)} XRP`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const section = "mt-8 rounded-card border border-border bg-surface-raised p-5";
-const cell = "px-3 py-2 text-left align-top";
+const cell = "px-2 py-2 text-left align-top sm:px-3";
 
 type Tile = { label: string; value: string; detail?: string };
 
@@ -113,8 +113,9 @@ export function MerchandiseSection({ merchandise }: { merchandise: MerchandiseMe
       </p>
       <Tiles tiles={merchandiseTiles(merchandise)} />
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[28rem] text-sm">
+      {/* Four short columns: narrow enough for a phone, so it never needs to scroll sideways. */}
+      <div className="mt-4">
+        <table className="w-full text-sm">
           <caption className="sr-only">Merchandise orders by fulfilment status</caption>
           <thead className="border-b border-border text-muted">
             <tr>
@@ -150,10 +151,16 @@ export function MerchandiseSection({ merchandise }: { merchandise: MerchandiseMe
 
       <Reconciliation reconciled={reconciliation.reconciled}>
         {reconciliation.reconciled ? (
-          <>
-            The totals of all {plural(merchandise.orders, "order")} come to {xrp(reconciliation.orderTotalsDrops)}, the
-            same as the sum of their order lines.
-          </>
+          merchandise.orders === 0 ? (
+            <>There are no orders to check yet.</>
+          ) : merchandise.orders === 1 ? (
+            <>The order&apos;s total is {xrp(reconciliation.orderTotalsDrops)}, the same as the sum of its order lines.</>
+          ) : (
+            <>
+              The totals of all {merchandise.orders} orders come to {xrp(reconciliation.orderTotalsDrops)}, the same as
+              the sum of their order lines.
+            </>
+          )
         ) : (
           <>
             Order totals come to {xrp(reconciliation.orderTotalsDrops)} but their order lines add up to{" "}
@@ -254,67 +261,53 @@ export function CollectiblesSection({
       <Tiles tiles={collectibleTiles(collectibles)} />
       <CollectiblePending collectibles={collectibles} />
 
-      <h3 className="mt-6 text-sm font-semibold">Sales behind this total</h3>
+      <h3 id="collectible-sales-heading" className="mt-6 text-sm font-semibold">
+        Sales behind this total
+      </h3>
       {sales.length === 0 ? (
         <p className="mt-2 text-sm text-muted">No collectible has been sold yet.</p>
       ) : (
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[36rem] text-sm">
-            <caption className="sr-only">Collectible sales and their XRP Ledger transactions</caption>
-            <thead className="border-b border-border text-muted">
-              <tr>
-                <th scope="col" className={cell}>
-                  Collectible
-                </th>
-                <th scope="col" className={cell}>
-                  Price
-                </th>
-                <th scope="col" className={cell}>
-                  Sold
-                </th>
-                <th scope="col" className={cell}>
-                  Transaction
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.map((sale) => (
-                <tr key={sale.tokenId} className="border-b border-border last:border-0">
-                  <th scope="row" className={`${cell} font-medium`}>
-                    <Link href={`/collectibles/${sale.collectibleId}`} className="hover:underline">
-                      {sale.title}
-                    </Link>{" "}
-                    <span className="font-normal text-muted">
-                      #{sale.edition} of {sale.editionSize}
-                    </span>
-                  </th>
-                  <td className={`${cell} tabular-nums`}>{xrp(sale.amountDrops)}</td>
-                  <td className={cell}>
-                    {sale.soldAt ? `${sale.soldAt.slice(0, 16).replace("T", " ")} UTC` : "Time not recorded"}
-                  </td>
-                  <td className={cell}>
-                    {sale.txHash && sale.explorerUrl ? (
-                      <a
-                        href={sale.explorerUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="font-mono text-accent underline"
-                        aria-label={`Purchase transaction ${sale.txHash} on the ledger explorer`}
-                      >
-                        {sale.txHash.slice(0, 8)}…{sale.txHash.slice(-6)}
-                      </a>
-                    ) : (
-                      <span className="text-critical">No transaction recorded</span>
-                    )}
-                    <span className="block text-muted">
-                      {sale.txHash ? ledgerCheckText(checkFor.get(sale.txHash)) : null}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        /*
+         * A list, not a table: four columns do not fit a phone, and a table that scrolls sideways
+         * hides the transaction, which is the point of this section.
+         */
+        <ul aria-labelledby="collectible-sales-heading" className="mt-2 divide-y divide-border text-sm">
+          {sales.map((sale) => (
+            <li key={sale.tokenId} className="py-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <p className="min-w-0 font-medium">
+                  <Link href={`/collectibles/${sale.collectibleId}`} className="hover:underline">
+                    {sale.title}
+                  </Link>{" "}
+                  <span className="font-normal text-muted">
+                    #{sale.edition} of {sale.editionSize}
+                  </span>
+                </p>
+                <p className="tabular-nums">{xrp(sale.amountDrops)}</p>
+              </div>
+              <p className="mt-1 text-muted">
+                {sale.soldAt ? `Sold ${sale.soldAt.slice(0, 16).replace("T", " ")} UTC` : "Sale time not recorded"}
+              </p>
+              {sale.txHash && sale.explorerUrl ? (
+                <>
+                  <a
+                    href={sale.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="mt-1 inline-flex min-h-6 items-center font-mono text-accent underline"
+                  >
+                    {/* Said before the hash, so the link makes sense out of context and keeps its visible text in its name. */}
+                    <span className="sr-only">Purchase transaction</span>{" "}
+                    {sale.txHash.slice(0, 8)}…{sale.txHash.slice(-6)}
+                  </a>
+                  <p className="text-muted">{ledgerCheckText(checkFor.get(sale.txHash))}</p>
+                </>
+              ) : (
+                <p className="mt-1 text-critical">No transaction recorded</p>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
       {collectibles.salesTruncated ? (
         <p className="mt-2 text-sm text-muted">
@@ -334,10 +327,19 @@ export function CollectiblesSection({
             The ledger does not match {plural(contradicted, "recorded sale")}. See the transactions marked above.
           </>
         ) : (
-          <>
-            All {plural(collectibles.sold, "sale")} carry the hash of a validated purchase transaction, and their
-            amounts come to {xrp(reconciliation.salesWithTransactionDrops)}.
-          </>
+          collectibles.sold === 0 ? (
+            <>There are no sales to check yet.</>
+          ) : collectibles.sold === 1 ? (
+            <>
+              The sale carries the hash of a validated purchase transaction, for{" "}
+              {xrp(reconciliation.salesWithTransactionDrops)}.
+            </>
+          ) : (
+            <>
+              All {collectibles.sold} sales carry the hash of a validated purchase transaction, and their amounts come
+              to {xrp(reconciliation.salesWithTransactionDrops)}.
+            </>
+          )
         )}
       </Reconciliation>
     </section>

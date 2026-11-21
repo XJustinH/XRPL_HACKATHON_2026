@@ -76,6 +76,7 @@ describe("MerchandiseSection", () => {
       "Cancelled (not counted)1575 XRP",
     ]);
     expect(within(section).getByText("Reconciled.")).toBeInTheDocument();
+    expect(section).toHaveTextContent("The totals of all 3 orders come to 109 XRP, the same as the sum of their order lines.");
     expect(within(section).queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -113,11 +114,16 @@ describe("CollectiblesSection", () => {
     expect(within(section).getByText("Purchases awaiting confirmation").nextElementSibling).toHaveTextContent("1");
     expect(within(section).getByText(/2 sell offers no longer on the ledger/)).toBeInTheDocument();
 
-    const link = within(section).getByRole("link", { name: /Purchase transaction/ });
+    // Each sale is a list item (a table's fourth column would be off a phone's screen), and the link's
+    // name starts with what it is and still contains the shortened hash that is shown.
+    const sale = within(within(section).getByRole("list", { name: "Sales behind this total" })).getByRole("listitem");
+    const link = within(sale).getByRole("link", { name: "Purchase transaction EEEEEEEE…EEEEEE" });
     expect(link).toHaveAttribute("href", `https://testnet.xrpl.org/transactions/${HASH}`);
-    expect(within(section).getByText("Checked on the ledger (ledger 1234)")).toBeInTheDocument();
-    expect(within(section).getByText("2026-11-21 10:05 UTC")).toBeInTheDocument();
+    expect(within(sale).getByText("Checked on the ledger (ledger 1234)")).toBeInTheDocument();
+    expect(within(sale).getByText("Sold 2026-11-21 10:05 UTC")).toBeInTheDocument();
+    expect(within(sale).getByText("5 XRP")).toBeInTheDocument();
     expect(within(section).getByText("Reconciled.")).toBeInTheDocument();
+    expect(section).toHaveTextContent("The sale carries the hash of a validated purchase transaction, for 5 XRP.");
   });
 
   it("raises an alert when the ledger contradicts a recorded sale, or a sale has no transaction", () => {
@@ -153,6 +159,7 @@ describe("CollectiblesSection", () => {
       />,
     );
     expect(screen.getByText("No collectible has been sold yet.")).toBeInTheDocument();
+    expect(screen.getByText("There are no sales to check yet.")).toBeInTheDocument();
   });
 });
 
