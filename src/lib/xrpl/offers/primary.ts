@@ -143,9 +143,9 @@ export async function requestPrimaryOffer(
 }
 
 /**
- * Brings one primary offer up to date with its sign request and the ledger. Safe to call
- * repeatedly and concurrently: effects are applied once, and a late answer never moves an
- * offer back.
+ * Brings one offer's creation up to date with its sign request and the ledger. Works for every
+ * kind the app creates (primary, resale, private sale, gift). Safe to call repeatedly and
+ * concurrently: effects are applied once, and a late answer never moves an offer back.
  */
 export async function reconcilePrimaryOffer(deps: OfferDeps, offerId: string): Promise<NFTOffer> {
   const offer = await deps.db.nFTOffer.findUnique({ where: { id: offerId } });
@@ -203,14 +203,15 @@ async function applyCreatedOffer(
   if (confirmed.account !== offer.ownerAddress) {
     throw new Error(`Offer ${offer.id} was signed by ${confirmed.account}, not ${offer.ownerAddress}`);
   }
-  // The live offer must be the one the app asked for: this NFT, a sell offer, the price, no Destination.
+  // The live offer must be the one the app asked for: this NFT, a sell offer, the price, and the same
+  // Destination (none for primary and resale offers; the named recipient for private sales and gifts).
   const live = await deps.ledger().getOffers(offer.nftokenId);
   const onLedger = live.sellOffers.find((o) => o.offerIndex === confirmed.offerIndex) ?? null;
   if (
     onLedger &&
     (onLedger.owner !== offer.ownerAddress ||
       onLedger.amountDrops !== offer.amountDrops ||
-      onLedger.destination)
+      (onLedger.destination ?? null) !== (offer.destinationAddress ?? null))
   ) {
     throw new Error(`Offer ${confirmed.offerIndex} on the ledger does not match offer ${offer.id}`);
   }
@@ -350,3 +351,6 @@ export async function getEventPrimaryOffers(
   if (isOwner) await reconcileEventPrimaryOffers(deps, input.eventId);
   return listPrimaryOffers(deps.db, input.eventId);
 }
+
+/** Same as `reconcilePrimaryOffer`, named for offers of any kind (XRPL-036/040/041). */
+export const reconcileOfferCreation = reconcilePrimaryOffer;

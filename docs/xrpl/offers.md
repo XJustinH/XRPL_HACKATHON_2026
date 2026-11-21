@@ -126,3 +126,58 @@ Limitations:
 - A sale made straight from the ledger with another wallet app is recorded once its transaction hash is
   reconciled (`POST /api/ledger/transactions/:hash/reconcile`, XRPL-032). Until then the offer is marked
   `STALE` the next time anyone tries to buy it in the app.
+
+## Holder offers: resale, private sale, gift (XRPL-036, 039, 040, 041)
+
+A ticket's current holder can offer it on, signing an `NFTokenCreateOffer` (sell) in their own Xaman wallet.
+Code: `src/lib/xrpl/offers/holder.ts`.
+
+| Route | Body | Offer on the ledger | Who can accept |
+|---|---|---|---|
+| `POST /api/tickets/:id/resale-offers` | `{ amountDrops }` | the holder's price, no `Destination` | anyone; the app lists it only while the resale rule allows (XRPL-037) |
+| `POST /api/tickets/:id/private-offers` | `{ destination, amountDrops }` | the holder's price, `Destination` = recipient | only the recipient: the ledger rejects anyone else |
+| `POST /api/tickets/:id/gift-offers` | `{ destination }` | `Amount: "0"`, `Destination` = recipient | only the recipient |
+
+All three take an `Idempotency-Key` header and return 201 `{ data: { offer, request } }`, where `request` is
+what the holder approves in Xaman.
+
+**Rules** (409 unless noted):
+- The holder must be the session's proven wallet (403 `WALLET_NOT_VERIFIED`).
+- That wallet must hold the NFT on a validated ledger.
+- The ticket must have had its primary sale. The organiser's unsold tickets go through primary offers.
+- Tickets that have been checked in, or whose event has finished, can't be offered.
+- A ticket has one live offer at a time.
+- A resale price is checked against the in-app price cap (XRPL-095) before anything is signed.
+- A zero price is only possible as a gift, which must name its recipient. The holder can't name themselves.
+
+**Recording:** offers become `ACTIVE` exactly like primary offers, through `reconcileOfferCreation`.
+The ledger's offer must match the recorded price and `Destination`. `GET /api/offers/:id` records a new
+offer when it is read.
+
+**Accepting** (`POST /api/offers/:id/accept-intent`, the same flow as buying a primary ticket):
+- **Resale** offers are found only through the resale rule's `getPublicOffer`, so a direct API call can't buy
+  a listing the app hides. Without the rule wired in, resale offers can't be bought here.
+- **Private sales and gifts** are visible only to the wallet they name. The ledger enforces the same
+  restriction.
+- **On success:** a validated transfer moves the ticket to its new owner (`cachedOwnerAddress`).
+  `primarySoldAt` stays as it was. Organiser metrics count private transfers and gifts separately from
+  resales (XRPL-076).
+
+**Limitations:**
+- A gift or private sale can't be reversed once accepted. The UI must confirm before creating one.
+- Cancelling an open offer is XRPL-042.
+- Offers made by a previous holder stay recorded as they were until reconciliation (XRPL-043). The ledger
+  no longer lets anyone accept them once the NFT has moved.
+
+Verified on XRPL Testnet (21 Nov 2026) by the live lifecycle suite, with each transaction recorded
+`VALIDATED_SUCCESS` from the ledger:
+- **Private sale:** offered
+  [`29DBDFA4…55A63458`](https://testnet.xrpl.org/transactions/29DBDFA433EAAC0885A9A80E9096F7B26F3D83084D11C66EDDF54C5855A63458)
+  and accepted by the named friend
+  [`51B4D2BD…E20288F9`](https://testnet.xrpl.org/transactions/51B4D2BDD34E004607D4A662EC5F3A9283A19176B64614664F3D8C2EE20288F9).
+  A direct attempt by another wallet was refused by the ledger with a `tec` result.
+- **Gift back:** offered
+  [`81C4B63E…19CE8DCA`](https://testnet.xrpl.org/transactions/81C4B63EBD45C5D1A0892F7257C899588F897E4719D9163345F6E88B19CE8DCA)
+  and accepted
+  [`11D3DF8C…80252ABB`](https://testnet.xrpl.org/transactions/11D3DF8C85CF817989FC5B0CBD5858840F8916D647DB483B83AE49D680252ABB).
+

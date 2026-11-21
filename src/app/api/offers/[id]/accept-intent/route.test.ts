@@ -10,6 +10,7 @@ const runIdempotent = vi.fn();
 vi.mock("next/server", () => ({ connection: async () => {} }));
 vi.mock("@/lib/auth/session", () => ({ requireSession: (req: Request) => requireSession(req) }));
 vi.mock("@/lib/xrpl/tickets/server", () => ({ mintingDeps: () => ({ db: "db" }) }));
+vi.mock("@/lib/resale-policy/server", () => ({ getResalePolicy: () => ({ getPublicOffer: async () => null }) }));
 vi.mock("@/lib/xrpl/idempotency", () => ({
   runIdempotent: (...args: unknown[]) => runIdempotent(...args),
 }));
@@ -45,7 +46,7 @@ describe("POST /api/offers/:id/accept-intent", () => {
     expect(res.status).toBe(201);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect((await res.json()).data).toMatchObject({ offerId: OFFER, request: { id: "r" } });
-    expect(requestPurchase).toHaveBeenCalledWith({ db: "db" }, { session: SESSION, offerId: OFFER });
+    expect(requestPurchase).toHaveBeenCalledWith(expect.objectContaining({ db: "db", resalePolicy: expect.any(Function) }), { session: SESSION, offerId: OFFER });
     expect(runIdempotent).toHaveBeenCalledWith(
       "db",
       {

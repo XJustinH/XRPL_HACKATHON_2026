@@ -327,6 +327,14 @@ export const TransactionPurpose = z.enum([
   "MINT_TICKET",
   "CREATE_PRIMARY_OFFER",
   "ACCEPT_PRIMARY_OFFER",
+  /** A ticket holder's public resale listing (XRPL-036). */
+  "CREATE_RESALE_OFFER",
+  /** A ticket holder's sale to one named wallet (XRPL-040). */
+  "CREATE_PRIVATE_OFFER",
+  /** A ticket holder's zero-price gift to one named wallet (XRPL-041). */
+  "CREATE_GIFT_OFFER",
+  /** Buying a resale ticket, or accepting a private sale or gift (XRPL-039/040/041). */
+  "ACCEPT_TRANSFER_OFFER",
 ]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
@@ -556,12 +564,34 @@ export type MintMappingReport = z.infer<typeof MintMappingReport>;
 export const CreatePrimaryOfferBody = z.object({}).strict();
 export type CreatePrimaryOfferBody = z.infer<typeof CreatePrimaryOfferBody>;
 
+/** A price above zero: giving a ticket away for nothing is a gift, which must name its recipient. */
+const PositiveDrops = Drops.refine((v) => v !== "0", "Set a price above 0 XRP, or send the ticket as a gift");
+
+/** `POST /api/tickets/:id/resale-offers` (XRPL-036): the holder's public resale price, in drops. */
+export const CreateResaleOfferBody = z.object({ amountDrops: PositiveDrops }).strict();
+export type CreateResaleOfferBody = z.infer<typeof CreateResaleOfferBody>;
+
+/** `POST /api/tickets/:id/private-offers` (XRPL-040): a sale only `destination` can accept. */
+export const CreatePrivateOfferBody = z.object({ destination: XrplAddress, amountDrops: PositiveDrops }).strict();
+export type CreatePrivateOfferBody = z.infer<typeof CreatePrivateOfferBody>;
+
+/** `POST /api/tickets/:id/gift-offers` (XRPL-041): a zero-price offer only `destination` can accept. */
+export const CreateGiftOfferBody = z.object({ destination: XrplAddress }).strict();
+export type CreateGiftOfferBody = z.infer<typeof CreateGiftOfferBody>;
+
 /** Response of `POST /api/tickets/:id/primary-offers`. Render `request` with the approval UI. */
 export const PrimaryOfferRequestResult = z.object({
   offer: NFTOfferDto,
   request: TransactionRequest,
 });
 export type PrimaryOfferRequestResult = z.infer<typeof PrimaryOfferRequestResult>;
+
+/**
+ * Response of the holder's offer routes (resale, private sale, gift; XRPL-036/040/041): the pending
+ * offer plus the transaction request to approve in Xaman. Same shape as a primary offer.
+ */
+export const TicketOfferRequestResult = PrimaryOfferRequestResult;
+export type TicketOfferRequestResult = PrimaryOfferRequestResult;
 
 /**
  * A live primary sell offer a buyer can accept: Agent C's `OfferPort.PrimaryOffer` fields plus
