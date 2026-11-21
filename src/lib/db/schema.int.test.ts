@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createPrismaClient } from "./client";
 
@@ -526,5 +528,88 @@ describe("physical products (XRPL-064)", () => {
     await product(seller.id);
     await expect(db.user.delete({ where: { id: seller.id } })).rejects.toMatchObject({ code: "P2003" });
     expect(await db.physicalProduct.count()).toBe(1);
+  });
+});
+
+describe("follows and wishlists (XRPL-061, XRPL-062)", () => {
+  async function people() {
+    const seller = await db.user.create({ data: { displayName: "Venue", role: "SELLER" } });
+    const fan = await db.user.create({ data: { displayName: "Fan" } });
+    return { seller, fan };
+  }
+
+  it("stores a follow once per pair, never of yourself, and counts followers by seller", async () => {
+    const { seller, fan } = await people();
+    const other = await db.user.create({ data: { displayName: "Other fan" } });
+    await db.follow.create({ data: { followerId: fan.id, sellerId: seller.id } });
+    await expect(db.follow.create({ data: { followerId: fan.id, sellerId: seller.id } })).rejects.toMatchObject({
+      code: "P2002",
+    });
+    await expect(db.follow.create({ data: { followerId: seller.id, sellerId: seller.id } })).rejects.toThrow(
+      /Follow_not_self/,
+    );
+    await db.follow.create({ data: { followerId: other.id, sellerId: seller.id } });
+    expect(await db.follow.count({ where: { sellerId: seller.id } })).toBe(2);
+  });
+
+  it("stores a saved event once per pair, and lists who saved an event", async () => {
+    const { seller, event } = await seedEvent();
+    const fan = await db.user.create({ data: { displayName: "Fan" } });
+    await db.wishlist.create({ data: { userId: fan.id, eventId: event.id } });
+    await expect(db.wishlist.create({ data: { userId: fan.id, eventId: event.id } })).rejects.toMatchObject({
+      code: "P2002",
+    });
+    await db.wishlist.create({ data: { userId: seller.id, eventId: event.id } });
+    const savers = await db.wishlist.findMany({ where: { eventId: event.id }, select: { userId: true } });
+    expect(savers.map((s) => s.userId).sort()).toEqual([fan.id, seller.id].sort());
+  });
+
+  it("removes follows and saved events with the user, seller or event", async () => {
+    const { seller, event } = await seedEvent();
+    const fan = await db.user.create({ data: { displayName: "Fan" } });
+    await db.follow.create({ data: { followerId: fan.id, sellerId: seller.id } });
+    await db.wishlist.create({ data: { userId: fan.id, eventId: event.id } });
+
+    await db.event.delete({ where: { id: event.id } });
+    expect(await db.wishlist.count()).toBe(0);
+    await db.user.delete({ where: { id: fan.id } });
+    expect(await db.follow.count()).toBe(0);
+  });
+
+  it("copies the lists kept in User.settings, keeping only what the app would accept", async () => {
+    // The backfill statements exactly as the migration runs them.
+    const dir = readdirSync(path.join("prisma", "migrations")).find((d) => d.endsWith("_add_follows_and_wishlist"));
+    const sql = readFileSync(path.join("prisma", "migrations", dir as string, "migration.sql"), "utf8");
+    const backfill = sql.split(/;\s*(?:\r?\n|$)/).filter((s) => /INSERT INTO "(Follow|Wishlist)"/.test(s));
+    expect(backfill).toHaveLength(2);
+
+    const { seller, event } = await seedEvent();
+    const organiser = await db.user.create({ data: { displayName: "Promoter", role: "ORGANISER" } });
+    const customer = await db.user.create({ data: { displayName: "Not a seller" } });
+    const fan = await db.user.create({
+      data: {
+        displayName: "Fan",
+        settings: {
+          profileVisibility: "PUBLIC",
+          follows: [seller.id, seller.id.toUpperCase(), organiser.id, customer.id, "not-an-id", 42],
+          wishlist: [event.id, "00000000-0000-4000-8000-000000000000", "junk"],
+        },
+      },
+    });
+    await db.user.update({
+      where: { id: seller.id },
+      data: { settings: { follows: [seller.id], wishlist: "not a list" } },
+    });
+
+    for (const statement of backfill) await db.$executeRawUnsafe(statement);
+    for (const statement of backfill) await db.$executeRawUnsafe(statement); // safe to run twice
+
+    const follows = await db.follow.findMany({ select: { followerId: true, sellerId: true } });
+    expect(follows.map((f) => `${f.followerId}>${f.sellerId}`).sort()).toEqual(
+      [`${fan.id}>${seller.id}`, `${fan.id}>${organiser.id}`].sort(),
+    );
+    expect(await db.wishlist.findMany({ select: { userId: true, eventId: true } })).toEqual([
+      { userId: fan.id, eventId: event.id },
+    ]);
   });
 });

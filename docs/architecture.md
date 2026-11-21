@@ -79,6 +79,7 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | "No category" is NULL, never an empty string (XRPL-015/059) | CHECK `Event_category_format` |
 | A product has a positive drops price, non-negative stock, at most 6 images, and a publish date once published (XRPL-064) | CHECK `PhysicalProduct_priceDrops_positive`, `_stock_nonnegative`, `_images_limit`, `_published_has_date`; `imageUrls` NOT NULL |
 | A product links only to its seller's own event | trigger `PhysicalProduct_event_same_seller` |
+| A follow or saved event is stored once; nobody follows themselves (XRPL-061/062) | `Follow @@id([followerId, sellerId])`, `Wishlist @@id([userId, eventId])`, CHECK `Follow_not_self` |
 
 Every timestamp is `timestamptz` (UTC). Every app ID is a UUID. Ledger identifiers (`NFTokenID`, offer index,
 tx hash) are separate 64-hex strings, canonicalised to upper case by the contracts.
