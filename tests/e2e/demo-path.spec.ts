@@ -85,3 +85,20 @@ test("a seller's storefront shows their published events only", async ({ page })
   await expect(page.getByText(HEADLINE)).toBeVisible();
   await expect(page.getByText(DRAFT)).toHaveCount(0);
 });
+
+test("the resale page and event page explain when resale tickets appear", async ({ page }) => {
+  await page.goto("/resale");
+
+  await expect(page.getByRole("heading", { name: "Resale tickets" })).toBeVisible();
+  // The demo seed has no resale listings, and resale opens only once an event sells out.
+  await expect(page.getByText("No resale tickets right now")).toBeVisible();
+  await expect(page.getByText(/only listed in this app once every primary ticket has sold/)).toBeVisible();
+
+  // An event still selling primary tickets says why it has no resale tickets, on its page and filtered here.
+  await page.goto(`/events/${DEMO_IDS.events.headlineShow}`);
+  await expect(page.getByRole("heading", { name: "Tickets from other fans" })).toBeVisible();
+  await expect(page.getByText(/Resale opens in this app once all primary tickets have sold/)).toBeVisible();
+  await page.goto(`/resale?eventId=${DEMO_IDS.events.headlineShow}`);
+  await expect(page.getByRole("heading", { name: `Resale tickets for ${HEADLINE}` })).toBeVisible();
+  await expect(page.getByText(/Resale opens in this app once all primary tickets have sold/)).toBeVisible();
+});

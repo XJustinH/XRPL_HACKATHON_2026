@@ -1,7 +1,7 @@
 import "server-only";
 import type { PrimaryAvailability } from "@/contracts/inventory";
 import type { AccountSummary, PrimaryOfferListing } from "@/contracts/xrpl";
-import type { ResaleEligibility } from "@/contracts";
+import type { ResaleEligibility, ResaleListing } from "@/contracts";
 import { getDb } from "@/lib/db/client";
 import { getPrimaryAvailability } from "@/lib/inventory/primary-inventory";
 import { listPrimaryOffers } from "@/lib/xrpl/offers/primary";
@@ -23,7 +23,8 @@ import { getXrplQueryService } from "@/lib/xrpl";
 export type EventPageReads = {
   availability(eventId: string): Promise<PrimaryAvailability>;
   primaryOffers(eventId: string): Promise<PrimaryOfferListing[]>;
-  resaleEligibility(eventId: string): Promise<ResaleEligibility>;
+  /** The resale rule's verdict and, when it allows resale, the public listings (XRPL-037/038). */
+  resale(eventId: string): Promise<{ eligibility: ResaleEligibility; offers: ResaleListing[] }>;
 };
 
 export function eventPageReads(): EventPageReads {
@@ -31,7 +32,7 @@ export function eventPageReads(): EventPageReads {
   return {
     availability: (eventId) => getPrimaryAvailability(db, eventId),
     primaryOffers: (eventId) => listPrimaryOffers(db, eventId),
-    resaleEligibility: (eventId) => getResalePolicy().getEligibility(eventId),
+    resale: (eventId) => getResalePolicy().listPublicOffers(eventId),
   };
 }
 

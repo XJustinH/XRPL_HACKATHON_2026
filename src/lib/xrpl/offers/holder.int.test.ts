@@ -389,6 +389,19 @@ describe("accepting holder offers", () => {
     await expect(buy(listed.all)).resolves.toMatchObject({ offerId: offer.id, amountDrops: "3000000" });
   });
 
+  it("refuses to hand over a ticket that was used after its offer was made", async () => {
+    const { seller, friend, event, ticket, offer, live } = await activeOffer("GIFT");
+    await db.checkInRecord.create({
+      data: { ticketId: ticket.id, eventId: event.id, organiserId: seller.id, walletAddress: HOLDER },
+    });
+    const { all, create } = deps({ ...holding(), sellOffers: [live] });
+
+    await expect(requestPurchase(all, { session: session(friend.id, FRIEND), offerId: offer.id })).rejects.toThrow(
+      "already been used",
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("records the new owner from the validated transfer and leaves the primary sale alone", async () => {
     const { friend, ticket, offer, live, soldAt } = await activeOffer("PRIVATE");
     const { all } = deps({ ...holding(), sellOffers: [live] });

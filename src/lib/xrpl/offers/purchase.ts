@@ -83,8 +83,8 @@ async function isLiveOnLedger(deps: ReconcileDeps, offer: NFTOffer): Promise<boo
 
 /**
  * Prepares the buyer's approval for an offer. 403 without a proven wallet · 404 unknown offer
- * or unpublished event · 409 when the ticket is no longer for sale, the buyer is the seller,
- * the buyer cannot pay, or someone is already buying it.
+ * or unpublished event · 409 when the ticket is no longer for sale, the buyer is the seller, the
+ * ticket has been used, the buyer cannot pay, or someone is already buying it.
  */
 export async function requestPurchase(
   deps: PurchaseDeps,
@@ -98,6 +98,7 @@ export async function requestPurchase(
         include: {
           event: { select: { title: true, status: true } },
           tier: { select: { name: true } },
+          checkIns: { select: { id: true }, take: 1 },
         },
       },
     },
@@ -114,6 +115,8 @@ export async function requestPurchase(
     throw errors.conflict("This ticket is no longer for sale");
   }
   if (buyer === offer.ownerAddress) throw errors.conflict("You can't buy a ticket from your own wallet");
+  // A ticket used to enter the event can't change hands, even if its offer was made before.
+  if (ticket.checkIns.length > 0) throw errors.conflict("This ticket has already been used to enter the event");
   // A resale offer can be bought here only while the in-app resale rule lists it (XRPL-037).
   if (offer.kind === "RESALE") {
     const listed = deps.resalePolicy ? await deps.resalePolicy().getPublicOffer(ticket.eventId, offer.id) : null;

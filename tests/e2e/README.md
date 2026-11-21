@@ -21,6 +21,7 @@ screenshots and traces as the `playwright-report` artifact (`npx playwright show
 | Seller | Sign in as the demo artist, create an event, add a tier, publish, then find it on the homepage |
 | Storefront | A seller's public page shows their published events and not their draft |
 | Publish refresh | Publishing is possible right after adding a tier, without a reload |
+| Resale page | The resale page, an event page and the resale page filtered to that event explain that listings appear only once an event sells out (the seed has none) |
 
 ## How they run
 
