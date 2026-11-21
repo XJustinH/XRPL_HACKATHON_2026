@@ -219,6 +219,66 @@ describe("event category (XRPL-015 / XRPL-059)", () => {
   });
 });
 
+describe("numeric tier price (XRPL-059)", () => {
+  it("always equals priceDrops, on create and update, whatever the app writes", async () => {
+    const { tier } = await seedEvent();
+    expect(tier.priceDropsNumeric).toBe(2_500_000n);
+
+    const repriced = await db.ticketTier.update({ where: { id: tier.id }, data: { priceDrops: "10" } });
+    expect(repriced.priceDropsNumeric).toBe(10n);
+    // Setting the number directly changes nothing: it follows the price.
+    const ignored = await db.ticketTier.update({ where: { id: tier.id }, data: { priceDropsNumeric: 1n } });
+    expect(ignored.priceDropsNumeric).toBe(10n);
+    const max = "9".repeat(18); // the largest price the format CHECK allows
+    expect((await db.ticketTier.update({ where: { id: tier.id }, data: { priceDrops: max } })).priceDropsNumeric).toBe(
+      BigInt(max),
+    );
+  });
+
+  it("filters by price as numbers, where the string comparison gets it wrong", async () => {
+    const { event } = await seedEvent();
+    await db.ticketTier.createMany({
+      data: ["9", "10", "11", "100000000000000000"].map((priceDrops) => ({
+        eventId: event.id,
+        name: `P${priceDrops}`,
+        priceDrops,
+        totalSupply: 1,
+      })),
+    });
+    const names = async (where: object) =>
+      (await db.ticketTier.findMany({ where: { eventId: event.id, ...where }, select: { name: true } }))
+        .map((t) => t.name)
+        .sort();
+
+    expect(await names({ priceDropsNumeric: { lte: 10n } })).toEqual(["P10", "P9"]);
+    // Why the column exists: as strings, "9" > "10", so the cheapest tier is missed.
+    expect(await names({ priceDrops: { lte: "10" } })).toEqual(["P10"]);
+    const cheapest = await db.ticketTier.findFirst({ where: { eventId: event.id }, orderBy: { priceDropsNumeric: "asc" } });
+    expect(cheapest?.name).toBe("P9");
+  });
+
+  it("rejects an out-of-range price with the format CHECK, not a cast error", async () => {
+    const { event } = await seedEvent();
+    const priceDrops = "1" + "0".repeat(18); // 19 digits: too long for the format, and for a bigint
+    await expect(
+      db.ticketTier.create({ data: { eventId: event.id, name: "Huge", priceDrops, totalSupply: 1 } }),
+    ).rejects.toThrow(/TicketTier_priceDrops_format/);
+  });
+
+  it("rejects a number that disagrees with the price even when the trigger is bypassed", async () => {
+    const { tier } = await seedEvent();
+    // DDL is transactional in Postgres: the failed transaction also undoes DISABLE TRIGGER.
+    const bypass = db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`ALTER TABLE "TicketTier" DISABLE TRIGGER "TicketTier_price_drops_numeric"`);
+      await tx.$executeRawUnsafe(`UPDATE "TicketTier" SET "priceDropsNumeric" = 1 WHERE "id" = $1::uuid`, tier.id);
+    });
+    await expect(bypass).rejects.toThrow(/TicketTier_priceDropsNumeric_matches/);
+
+    const after = await db.ticketTier.update({ where: { id: tier.id }, data: { priceDropsNumeric: 1n } });
+    expect(after.priceDropsNumeric).toBe(2_500_000n); // the trigger is active again
+  });
+});
+
 describe("reviews (XRPL-079)", () => {
   /** An event with one admitted ticket, plus the attendee who will review it. */
   async function admitted(nftokenId = NFT_A, serial = 1) {
@@ -300,5 +360,83 @@ describe("reviews (XRPL-079)", () => {
     await db.review.create({ data: { eventId: event.id, authorId: author.id, rating: 2 } });
     await db.user.delete({ where: { id: author.id } });
     expect(await db.review.count()).toBe(0);
+  });
+});
+
+describe("friendships (XRPL-084)", () => {
+  // Either side of the digit/letter boundary. The friend service orders a pair by lowercase text
+  // ("9…" < "a…"), and Postgres must order the UUIDs the same way for the pair-order CHECK.
+  const LOW = "9fffffff-ffff-4fff-bfff-ffffffffffff";
+  const HIGH = "a0000000-0000-4000-8000-000000000000";
+
+  async function pair() {
+    const low = await db.user.create({ data: { id: LOW, displayName: "Aoife" } });
+    const high = await db.user.create({ data: { id: HIGH, displayName: "Brian" } });
+    return { low, high };
+  }
+
+  it("stores a pair once, lower ID first, whoever asked", async () => {
+    const { low, high } = await pair();
+    const request = await db.friendConnection.create({
+      data: { userLowId: low.id, userHighId: high.id, requestedById: high.id },
+    });
+    expect(request).toMatchObject({ status: "PENDING", respondedAt: null });
+
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: low.id } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+    await expect(
+      db.friendConnection.create({ data: { userLowId: high.id, userHighId: low.id, requestedById: low.id } }),
+    ).rejects.toThrow(/FriendConnection_pair_order/);
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: low.id, requestedById: low.id } }),
+    ).rejects.toThrow(/FriendConnection_pair_order/);
+  });
+
+  it("only lets one of the two people be the requester", async () => {
+    const { low, high } = await pair();
+    const other = await db.user.create({ data: { displayName: "Ciara" } });
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: other.id } }),
+    ).rejects.toThrow(/FriendConnection_requester_in_pair/);
+  });
+
+  it("records when a request was accepted, and only then", async () => {
+    const { low, high } = await pair();
+    const { id } = await db.friendConnection.create({
+      data: { userLowId: low.id, userHighId: high.id, requestedById: low.id },
+    });
+    await expect(db.friendConnection.update({ where: { id }, data: { status: "ACCEPTED" } })).rejects.toThrow(
+      /FriendConnection_responded_when_accepted/,
+    );
+    await expect(db.friendConnection.update({ where: { id }, data: { respondedAt: new Date() } })).rejects.toThrow(
+      /FriendConnection_responded_when_accepted/,
+    );
+    const accepted = await db.friendConnection.update({
+      where: { id },
+      data: { status: "ACCEPTED", respondedAt: new Date() },
+    });
+    expect(accepted.status).toBe("ACCEPTED");
+  });
+
+  it("allows one block per direction, never of yourself", async () => {
+    const { low, high } = await pair();
+    await db.userBlock.create({ data: { blockerId: low.id, blockedId: high.id } });
+    await expect(db.userBlock.create({ data: { blockerId: low.id, blockedId: high.id } })).rejects.toMatchObject({
+      code: "P2002",
+    });
+    await db.userBlock.create({ data: { blockerId: high.id, blockedId: low.id } });
+    await expect(db.userBlock.create({ data: { blockerId: low.id, blockedId: low.id } })).rejects.toThrow(
+      /UserBlock_not_self/,
+    );
+  });
+
+  it("removes a user's friendships and blocks with the user", async () => {
+    const { low, high } = await pair();
+    await db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: low.id } });
+    await db.userBlock.create({ data: { blockerId: high.id, blockedId: low.id } });
+    await db.user.delete({ where: { id: low.id } });
+    expect(await db.friendConnection.count()).toBe(0);
+    expect(await db.userBlock.count()).toBe(0);
   });
 });

@@ -67,12 +67,15 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | An address belongs to one user per network | `WalletLink @@unique([network, address])` |
 | No over-minting | CHECK `0 <= mintedQuantity <= totalSupply`, `totalSupply > 0` |
 | XRP amounts are integer drops strings | CHECK regex on `priceDrops` / `amountDrops` |
+| A tier's numeric price (`priceDropsNumeric`, for price filters and sorting, XRPL-059) equals `priceDrops` | trigger `TicketTier_price_drops_numeric` sets it; CHECK `TicketTier_priceDropsNumeric_matches` |
 | A `MINTED` ticket has ledger identity | CHECK `nftokenId`, `mintTxHash`, `mintedAt` present |
 | Gifts are zero-price and recipient-bound; private offers name a recipient | CHECK on `NFTOffer` |
 | Retried mutations don't double-apply | `IdempotencyRecord @@unique([scope, route, key])` |
 | One review per author per event, and per check-in (XRPL-079) | `Review @@unique([eventId, authorId])`, `Review.checkInRecordId` unique |
 | A review's check-in is an admission to the same event | trigger `Review_checkin_same_event` |
 | Review rating 1–5, body ≤ 2000 characters | CHECK `Review_rating_range`, `Review_body_length` |
+| A friend pair is stored once, lower ID first; the requester is one of the pair; `respondedAt` is set exactly when accepted (XRPL-084) | `FriendConnection @@unique([userLowId, userHighId])`, CHECK `FriendConnection_pair_order`, `FriendConnection_requester_in_pair`, `FriendConnection_responded_when_accepted` |
+| One block per direction, never of yourself | `UserBlock @@id([blockerId, blockedId])`, CHECK `UserBlock_not_self` |
 | "No category" is NULL, never an empty string (XRPL-015/059) | CHECK `Event_category_format` |
 
 Every timestamp is `timestamptz` (UTC). Every app ID is a UUID. Ledger identifiers (`NFTokenID`, offer index,

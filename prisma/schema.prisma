@@ -110,12 +110,16 @@ model User {
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
-  wallets         WalletLink[]
-  sessions        Session[]
-  events          Event[]         @relation("EventSeller")
-  checkInsScanned CheckInRecord[] @relation("CheckInOrganiser")
-  offersCreated   NFTOffer[]      @relation("OfferCreatedBy")
-  reviews         Review[]        @relation("ReviewAuthor")
+  wallets               WalletLink[]
+  sessions              Session[]
+  events                Event[]            @relation("EventSeller")
+  checkInsScanned       CheckInRecord[]    @relation("CheckInOrganiser")
+  offersCreated         NFTOffer[]         @relation("OfferCreatedBy")
+  reviews               Review[]           @relation("ReviewAuthor")
+  friendConnectionsLow  FriendConnection[] @relation("FriendLow")
+  friendConnectionsHigh FriendConnection[] @relation("FriendHigh")
+  blocksMade            UserBlock[]        @relation("Blocker")
+  blocksReceived        UserBlock[]        @relation("Blocked")
 
   @@index([isDemo])
 }
@@ -237,24 +241,30 @@ model Event {
 }
 
 model TicketTier {
-  id             String   @id @default(uuid()) @db.Uuid
-  eventId        String   @db.Uuid
-  name           String
-  description    String   @default("")
+  id                String   @id @default(uuid()) @db.Uuid
+  eventId           String   @db.Uuid
+  name              String
+  description       String   @default("")
   /// Integer drops as a decimal string, e.g. "2500000" (= 2.5 XRP).
-  priceDrops     String
-  totalSupply    Int
+  priceDrops        String
+  /// `priceDrops` as a number, for price filters and sorting in queries (XRPL-059): compared as
+  /// strings, "9" > "10". The database keeps it equal to `priceDrops` (trigger
+  /// "TicketTier_price_drops_numeric", CHECK "TicketTier_priceDropsNumeric_matches"): read it, never set it.
+  priceDropsNumeric BigInt   @default(0)
+  totalSupply       Int
   /// Number of tickets with a validated NFTokenMint (MintStatus.MINTED).
-  mintedQuantity Int      @default(0)
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  mintedQuantity    Int      @default(0)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
 
   event   Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
   tickets TicketNFT[]
 
   @@unique([eventId, name])
   @@index([eventId])
+  /// Price filter (XRPL-059): tiers at or below a price.
+  @@index([priceDropsNumeric])
 }
 
 /// One row per intended ticket NFT. The row may exist before the mint is validated
@@ -440,6 +450,53 @@ model Review {
 
   @@unique([eventId, authorId])
   @@index([eventId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Friends (XRPL-084): opt-in connections between users, and blocks
+// ---------------------------------------------------------------------------
+
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+}
+
+/// A friend request (PENDING) or friendship (ACCEPTED) between two users (XRPL-084). Declining or
+/// removing deletes the row. Stored once per pair, lower ID first (CHECK FriendConnection_pair_order),
+/// so A→B and B→A can't both exist and nobody befriends themselves. The requester is one of the pair
+/// (CHECK FriendConnection_requester_in_pair), and respondedAt is set exactly when the request is
+/// accepted (CHECK FriendConnection_responded_when_accepted).
+model FriendConnection {
+  id            String       @id @default(uuid()) @db.Uuid
+  /// The pair, lower ID first: Postgres orders UUIDs as their lowercase text sorts.
+  userLowId     String       @db.Uuid
+  userHighId    String       @db.Uuid
+  /// Who sent the request: userLowId or userHighId.
+  requestedById String       @db.Uuid
+  status        FriendStatus @default(PENDING)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  /// When the request was accepted. Null while PENDING.
+  respondedAt   DateTime?    @db.Timestamptz(3)
+
+  userLow  User @relation("FriendLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh User @relation("FriendHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+
+  @@unique([userLowId, userHighId])
+  @@index([userHighId])
+}
+
+/// blockerId blocked blockedId: no friend requests either way, and any connection between them is
+/// deleted (XRPL-084). One block per direction; nobody can block themselves (CHECK UserBlock_not_self).
+model UserBlock {
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
 }
 
 // ---------------------------------------------------------------------------
