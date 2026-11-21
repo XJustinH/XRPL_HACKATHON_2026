@@ -75,6 +75,7 @@ export function SiteHeader({ session }: { session: HeaderSession | null }) {
           <span
             aria-hidden="true"
             className="grid size-8 place-items-center rounded-lg bg-accent text-sm font-bold text-accent-ink"
+            style={{ backgroundImage: "linear-gradient(135deg, #7aa2ff, #a78bfa)" }}
           >
             XT
           </span>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { EVENT_CATEGORY_LABELS, safeExternalUrl, type EventView } from "@/contracts";
+import { ArtworkPlaceholder } from "@/components/ui/artwork-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { formatEventDate, formatXrp, lowestPriceDrops } from "./event-formatting";
 
@@ -24,7 +25,7 @@ export function EventCard({ event }: { event: EventView }) {
      * link's outline is switched off (`!`, because the global `:focus-visible` rule is unlayered
      * and would otherwise win).
      */
-    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition-colors hover:border-accent has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-accent">
+    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lift has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-accent">
       <Link href={`/events/${event.id}`} className="block focus-visible:outline-none!">
         <div className="aspect-[16/9] w-full overflow-hidden bg-surface">
           {artworkUrl ? (
@@ -33,15 +34,10 @@ export function EventCard({ event }: { event: EventView }) {
               src={artworkUrl}
               alt=""
               loading="lazy"
-              className="size-full object-cover"
+              className="size-full object-cover transition duration-300 group-hover:scale-[1.03]"
             />
           ) : (
-            <div
-              aria-hidden="true"
-              className="grid size-full place-items-center text-2xl font-semibold text-muted"
-            >
-              {event.title.slice(0, 1).toUpperCase()}
-            </div>
+            <ArtworkPlaceholder name={event.title} />
           )}
         </div>
 

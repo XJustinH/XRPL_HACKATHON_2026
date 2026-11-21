@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArtworkPlaceholder } from "@/components/ui/artwork-placeholder";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { safeExternalUrl, type SellerProfile } from "@/contracts";
@@ -60,12 +61,7 @@ function ProfileHeader({ profile }: { profile: SellerProfile }) {
           // eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host
           <img src={imageUrl} alt="" className="size-full object-cover" />
         ) : (
-          <div
-            aria-hidden="true"
-            className="grid size-full place-items-center text-2xl font-semibold text-muted"
-          >
-            {profile.displayName.slice(0, 1).toUpperCase()}
-          </div>
+          <ArtworkPlaceholder name={profile.displayName} className="text-3xl!" />
         )}
       </div>
 
