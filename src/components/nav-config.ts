@@ -39,6 +39,15 @@ export const accountNav: NavItem[] = [
     requiresSession: true,
   },
   { href: "/following", label: "Following", requiresSession: true },
+  // Physical merchandise (XRPL-065 to XRPL-069).
+  { href: "/cart", label: "Cart", requiresSession: true },
+  { href: "/orders", label: "Orders", requiresSession: true },
+  {
+    href: "/seller/products",
+    label: "Merchandise",
+    roles: ["SELLER", "ORGANISER"],
+    requiresSession: true,
+  },
 ];
 
 export function visibleNavItems(

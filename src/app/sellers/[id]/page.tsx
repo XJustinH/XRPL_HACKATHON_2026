@@ -6,6 +6,7 @@ import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
 import { EventCard } from "@/features/events/event-card";
+import { SellerMerchSection } from "@/features/commerce/seller-merch-section";
 import { organiserBrowseHref } from "@/features/discovery/browse-links";
 import { isFollowing } from "@/features/profiles/follows";
 import { FollowButton } from "@/features/profiles/follow-button";
@@ -196,13 +197,16 @@ export default async function SellerStorefrontPage({
         )}
       </section>
 
-      <section aria-labelledby="merch-heading" className="mt-10">
-        <h2 id="merch-heading" className="mb-4 text-lg font-semibold">
-          Merchandise
+      {/* Published physical merchandise (XRPL-065/066). Renders its own "Merchandise" section. */}
+      <SellerMerchSection sellerId={profile.id} />
+
+      <section aria-labelledby="collectibles-heading" className="mt-10">
+        <h2 id="collectibles-heading" className="mb-4 text-lg font-semibold">
+          Digital collectibles
         </h2>
         <NotImplementedNotice
-          title="Merchandise and digital collectibles"
-          blockedBy="XRPL-064 to XRPL-066 (physical merchandise) and XRPL-070 to XRPL-074 (digital collectibles)"
+          title="Digital collectibles"
+          blockedBy="XRPL-070 to XRPL-074 (digital collectibles)"
         />
       </section>
     </>

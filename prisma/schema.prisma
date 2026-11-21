@@ -124,6 +124,8 @@ model User {
   following             Follow[]           @relation("Follower")
   followers             Follow[]           @relation("FollowedSeller")
   wishlist              Wishlist[]
+  merchOrdersBought     MerchOrder[]       @relation("MerchOrderBuyer")
+  merchOrdersSold       MerchOrder[]       @relation("MerchOrderSeller")
 
   @@index([isDemo])
 }
@@ -575,10 +577,69 @@ model PhysicalProduct {
 
   seller User   @relation("ProductSeller", fields: [sellerId], references: [id], onDelete: Restrict)
   event  Event? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  /// Order lines that sold this product (XRPL-067/068).
+  orderItems MerchOrderItem[]
 
   @@index([sellerId, status, createdAt])
   /// Merchandise for an event page, and unlinking products when an event is deleted.
   @@index([eventId])
+}
+
+/// Lifecycle of a merchandise order (XRPL-068). Allowed changes: NEW -> PROCESSING or CANCELLED,
+/// PROCESSING -> SHIPPED or CANCELLED, SHIPPED -> FULFILLED. FULFILLED and CANCELLED are final.
+enum MerchOrderStatus {
+  NEW
+  PROCESSING
+  SHIPPED
+  FULFILLED
+  CANCELLED
+}
+
+/// A customer's order for one seller's physical merchandise (XRPL-067 to 069). Ordinary goods, not
+/// NFTs: no ledger identifiers. Payment is simulated for the hackathon: no money moves and no card
+/// or wallet payment details are stored. Placing an order takes its units out of
+/// PhysicalProduct.stock in the same transaction; cancelling puts them back, once
+/// (`restockedAt`). The database guarantees a positive drops total (CHECK MerchOrder_totalDrops_positive).
+model MerchOrder {
+  id              String           @id @default(uuid()) @db.Uuid
+  buyerId         String           @db.Uuid
+  sellerId        String           @db.Uuid
+  status          MerchOrderStatus @default(NEW)
+  /// Sum of unit price x quantity over the items, integer drops as a decimal string.
+  totalDrops      String
+  /// Where to send the goods. Seen only by the buyer and the seller.
+  shippingName    String
+  shippingAddress String
+  /// Set when a cancellation returned the units to stock. Guards against restocking twice.
+  restockedAt     DateTime?        @db.Timestamptz(3)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+
+  buyer  User             @relation("MerchOrderBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  seller User             @relation("MerchOrderSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  items  MerchOrderItem[]
+
+  @@index([buyerId, createdAt])
+  @@index([sellerId, status, createdAt])
+}
+
+/// One product line of a merchandise order. Name and unit price are copied at purchase, so a later
+/// edit to the product never changes a past order. The database guarantees a quantity of at least 1
+/// (CHECK MerchOrderItem_quantity_positive) and a positive unit price (MerchOrderItem_unitPriceDrops_positive).
+model MerchOrderItem {
+  id             String @id @default(uuid()) @db.Uuid
+  orderId        String @db.Uuid
+  productId      String @db.Uuid
+  productName    String
+  /// Integer drops as a decimal string, as charged per unit.
+  unitPriceDrops String
+  quantity       Int
+
+  order   MerchOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product PhysicalProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+  @@index([productId])
 }
 
 // ---------------------------------------------------------------------------
