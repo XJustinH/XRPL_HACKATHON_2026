@@ -21,6 +21,8 @@ import { NFTOfferDto, OfferState, TicketDto, TicketTierDto, XrplNetwork } from "
  * - NOT_VALIDATED: the transaction is not (yet) in a validated ledger (retryable).
  * - TX_FAILED: the transaction was validated with a result other than tesSUCCESS.
  * - PROVIDER_UNAVAILABLE: the wallet signing provider (Xaman) could not be reached or failed (retryable).
+ * - PROVIDER_LIMIT_REACHED: the wallet signing provider is refusing new requests because the app's
+ *   quota is used up. Not retryable straight away: it clears with time, or needs new credentials.
  * - RPC_ERROR: any other ledger error response.
  * - UNEXPECTED: an error the service could not classify.
  */
@@ -34,6 +36,7 @@ export const XrplErrorCode = z.enum([
   "NOT_VALIDATED",
   "TX_FAILED",
   "PROVIDER_UNAVAILABLE",
+  "PROVIDER_LIMIT_REACHED",
   "RPC_ERROR",
   "UNEXPECTED",
 ]);
