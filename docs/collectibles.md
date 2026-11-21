@@ -157,9 +157,14 @@ Pages: `/seller/collectibles`, `/collectibles/:id`, `/collectibles`. Mountable s
   and a stale offer refused before the wallet is asked.
 - Verified by hand against a local dev server: the upload route (multipart, errors), ranged media
   reads, draft privacy, publishing, the metadata URL and the three pages.
-- **Not yet verified on Testnet.** No collectible has been minted, listed or bought on the live XRPL
-  Testnet: that needs a person approving in Xaman. The transactions are the same types the ticket flow
-  has already run on Testnet through the same wallet service. Live verification is pending.
+- **Verified on live XRPL Testnet** by `tests/testnet/collectibles.testnet.test.ts` (on demand,
+  `npm run test:testnet`): one edition is minted, listed for sale and bought by another wallet, each
+  recorded only from its validated transaction. The NFT carries the collectible taxon and the edition's
+  metadata URI, the buyer's collection shows it after a ledger ownership check, the seller's doesn't,
+  and no ticket record is created. The person approving in Xaman is simulated there, as in the ticket
+  lifecycle suite.
+- **Not yet done with a real phone.** Nobody has approved a collectible mint, listing or purchase in
+  the Xaman app itself.
 
 ## Limitations and follow-ups
 
@@ -175,6 +180,10 @@ Pages: `/seller/collectibles`, `/collectibles/:id`, `/collectibles`. Mountable s
 - One approval per edition, and per sale listing. No batch mint, no cancel-offer or price change for a
   live listing (the seller can cancel in their wallet; the app then marks it stale and allows relisting).
 - An unapproved wallet request holds its edition until it expires (10 minutes) or is declined.
+- **A mint approved late is not recorded.** Xaman lets a request that was opened in time be approved
+  after it expired. By then the app has freed the edition, so that mint is not recorded, and minting
+  the edition again creates a second NFT for it in the seller's wallet. The ticket flow closes this in
+  XRPL-027 with a `LastLedgerSequence` deadline on the mint; collectibles should adopt the same.
 - The collection lists collectibles the app recorded for the wallet. One received by a transfer made
   outside the app does not appear until a ledger-wide scan is added.
 - An uploaded file that is never attached to a collectible stays in storage (no cleanup job).
