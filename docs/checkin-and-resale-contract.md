@@ -224,3 +224,33 @@ It shows the average, the list with an empty state, a star-rating form for atten
 they already posted), and plain messages for non-attendees and signed-out visitors.
 
 `unavailableReviewStore` (503 for everything) is kept in `server.ts` to switch reviews off quickly if ever needed.
+
+
+## Friend connections (XRPL-084)
+
+**Status:** logic, routes and the `/friends` page are done. **Friendship storage waits on Agent A's
+`FriendConnection` and `UserBlock` tables** (schema request in the PR). Until they land, friendship
+routes answer 503 ("Friends aren't available yet"). The friend-list privacy setting already works,
+since it lives in `User.settings`.
+
+- **Opt-in by design** (handoff §2.2). People connect by sharing a **friend code**, which is their
+  account ID; there is no name search. A friend list is visible only to its owner unless they choose
+  "my friends", and a private profile never shows it.
+- **Stored once per pair**, lower account ID first, so "A asked B" and "B asked A" can't both exist.
+  Asking someone who already asked you makes you friends, including when both people ask at once.
+- **Remove and block** delete the connection. Block also stops requests in both directions, without
+  saying why. `FriendService.areFriends` / `listFriendIds` exclude blocked people, so XRPL-085/086 must
+  use them: removing or blocking someone revokes their access to anything shared later.
+
+| Route | Result |
+|---|---|
+| `GET /api/friends` | `{ myCode, friends, incoming, outgoing, blocked, friendsVisibility }` |
+| `POST /api/friends/requests` `{ userId }` | 201 PENDING, or 200 ACCEPTED if they'd asked you; 400 self, 404 unknown, 403 blocked, 409 pending/already friends |
+| `POST /api/friends/requests/:id/respond` `{ accept }` | Accept or decline a request sent to you; 404 otherwise |
+| `DELETE /api/friends/:userId` | Unfriend, or cancel/decline a pending request |
+| `POST /api/friends/blocks` `{ userId }`, `DELETE /api/friends/blocks/:userId` | Block (idempotent), unblock (doesn't restore the friendship) |
+| `PATCH /api/friends/settings` `{ friendsVisibility }` | `ONLY_ME` (default) or `FRIENDS` |
+| `GET /api/users/:id/friends` | `{ visible, friends }`; a hidden list looks the same as an empty one |
+
+**When the tables land:** add a Prisma `FriendStore` and swap `unavailableFriendStore` in
+`src/features/friends/server.ts`. Nothing else changes.
