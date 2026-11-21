@@ -30,6 +30,15 @@ export function PublishPanel({
   const [error, setError] = useState<string | null>(null);
   const [serverBlockers, setServerBlockers] = useState<PublishBlocker[] | null>(null);
 
+  // Take the fresh event when the page re-renders with one (e.g. `router.refresh()` after a tier
+  // is added), so the blockers and the Publish button reflect it without a reload.
+  const [seenEvent, setSeenEvent] = useState(initialEvent);
+  if (initialEvent !== seenEvent) {
+    setSeenEvent(initialEvent);
+    setEvent(initialEvent);
+    setServerBlockers(null);
+  }
+
   const blockers = serverBlockers ?? publishBlockers(event);
   const minted = mintedTicketCount(event);
   const isPublished = event.status === "PUBLISHED";
