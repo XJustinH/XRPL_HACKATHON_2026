@@ -38,15 +38,17 @@ sale.
 | Signed and submitted, not yet validated | unchanged | hash recorded |
 | Rejected by the ledger (`tec…`) | `FAILED` | `VALIDATED_FAILURE` |
 | Declined, expired, cancelled, or never validated | `FAILED` | `DROPPED` |
-| Validated, but the ticket was checked in meanwhile | `STALE`: created on the ledger, but not live in this app | `VALIDATED_SUCCESS` |
+| Validated, but the ticket was checked in meanwhile | `ACTIVE`: it is live on the ledger. It can't be bought or listed in the app, and its owner can cancel it | `VALIDATED_SUCCESS` |
 | Xaman no longer has the request, 15 minutes on, but it was signed (its transaction hash was recorded) | settled from that transaction: as above for `tesSUCCESS` or a `tec…` result | as above |
 | The request can't be signed or followed any more 15 minutes on (never recorded because the server stopped in between, unsigned and forgotten by Xaman, or its transaction never validated), and no matching offer is on the ledger | `FAILED` | `DROPPED` when one was recorded |
-| The same, but a matching offer is on the ledger (it was signed) | unchanged: left awaiting approval and logged for someone to resolve | unchanged |
+| The same, but a matching offer is on the ledger (it was signed) | unchanged and logged: it stays awaiting approval until that ledger offer is gone (its owner cancels it from their wallet). The next read then gives `FAILED`, as in the row above | unchanged |
 
 Effects apply once (the `LedgerTransaction` is claimed through `appliedAt`), and a late answer never moves
 an offer back. A `FAILED` listing frees the ticket to be listed again. These rows apply to every kind of
-offer the app creates (primary, resale, private sale, gift). Xaman requests expire after 10 minutes, so 15
-minutes on nothing more can be signed.
+offer the app creates (primary, resale, private sale, gift). Xaman's 10-minute expiry only limits opening
+a request: one opened in time can still be signed later. The 15-minute rule doesn't cover that yet for
+offers and purchases, as it does for mints
+([ticket-nft.md](ticket-nft.md#failures-and-retries-xrpl-027)).
 
 ### Listing for buyers
 
@@ -220,11 +222,14 @@ what the holder approves in Xaman.
   one awaiting approval is reconciled, and an open one is checked against the ledger. So a declined,
   expired, or vanished offer doesn't block a new one.
 - An earlier holder's offers can't be filled once the NFT has moved. Their open offer is closed as `STALE`
-  when the new holder makes an offer. One still awaiting approval is left to settle: the ledger would
-  reject it now, so it ends `FAILED`.
+  when the new holder makes an offer, unless a purchase or cancellation of it is in flight: that records
+  its own outcome. One still awaiting approval is left to settle: the ledger would reject it now, so it
+  ends `FAILED`.
 - The wallet must have the owner reserve a new offer locks (0.2 XRP on Testnet), plus one increment for
-  each of its other offers still awaiting approval. Otherwise the ledger would reject the offer with
-  `tecINSUFFICIENT_RESERVE` and still charge the fee.
+  each of its other offers made in the last 15 minutes and still awaiting approval. Otherwise the ledger
+  would reject the offer with `tecINSUFFICIENT_RESERVE` and still charge the fee. The check is repeated
+  as the offer is recorded, one offer at a time per wallet, so two offers made at once can't both pass
+  on the same spare XRP.
 - A resale price is checked against the in-app price cap (XRPL-095) before anything is signed.
 - A zero price is only possible as a gift, which must name its recipient. The holder can't name themselves.
 
@@ -246,9 +251,12 @@ offer when it is read.
 **Limitations:**
 - A gift or private sale can't be reversed once accepted. The ticket page asks for confirmation before
   creating a gift.
-- An offer whose request was lost after it was signed stays awaiting approval in the app. The ticket
-  can't be offered again here until someone resolves it, and its ledger offer can be bought directly
-  meanwhile.
+- An offer whose request was lost after it was signed stays awaiting approval in the app, and the ticket
+  page keeps showing it as waiting in Xaman. The app can't cancel it, because it never recorded the
+  ledger offer. So the ticket can't be offered again here, and the ledger offer can still be bought
+  directly. To free the ticket, its owner cancels that sell offer from their wallet
+  (`NFTokenCancelOffer`). The next read of the ticket page or the offer then finds no matching offer and
+  marks it `FAILED`.
 - An offer made by a previous holder stays recorded until it's next read, then closes as `STALE` (see
   [Cancelling an offer](#cancelling-an-offer-xrpl-042)). Either way, the ledger no longer lets anyone accept
   it once the NFT has moved.
