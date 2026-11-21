@@ -204,6 +204,21 @@ Verified on XRPL Testnet (21 Nov 2026) by the live lifecycle suite, with each tr
   [`81C4B63E…19CE8DCA`](https://testnet.xrpl.org/transactions/81C4B63EBD45C5D1A0892F7257C899588F897E4719D9163345F6E88B19CE8DCA)
   and accepted
   [`11D3DF8C…80252ABB`](https://testnet.xrpl.org/transactions/11D3DF8C85CF817989FC5B0CBD5858840F8916D647DB483B83AE49D680252ABB).
+- **Resale purchase (XRPL-039):** `tests/testnet/resale-purchase.testnet.test.ts`, on a one-ticket event.
+  - The primary sale
+    ([`01446412…FFEB3923`](https://testnet.xrpl.org/transactions/014464126B08829FC3EC2828A097BD68C08F10E02DDF67B0E854F06BFFEB3923))
+    sold the event out, which opened in-app resale.
+  - The holder listed the ticket for 1.5 XRP
+    ([`E839D814…4D0FB6B0`](https://testnet.xrpl.org/transactions/E839D814D8FC63BDB943DF75FA2979F569107C35934DDE14ADC4808F4D0FB6B0)).
+    The resale rule listed it, and the offer page showed it for sale to another fan.
+  - That fan bought it in their own wallet
+    ([`C7D1563D…832F6B29`](https://testnet.xrpl.org/transactions/C7D1563D69B024D99676A4E7CAA4659315B1763CC0839CE37BFE7F3F832F6B29),
+    `tesSUCCESS`, ledger 22489127). On the ledger the NFT moved to the fan, the offer was gone, and the
+    holder's balance rose by exactly 1.5 XRP.
+  - In the app, My tickets (read from each wallet's NFTs) showed the ticket for the fan and not for the
+    previous holder. The offer was `ACCEPTED`, the listing was gone, and the organiser's figures counted
+    one resale.
+  - The fan then checked in once. A second scan, and a door code for the previous holder, were refused.
 
 ## Cancelling an offer (XRPL-042)
 
