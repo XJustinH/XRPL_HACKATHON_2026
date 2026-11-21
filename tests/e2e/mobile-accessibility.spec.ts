@@ -262,6 +262,8 @@ for (const phone of PHONES) {
       await signInAs(page, ARTIST);
       await page.goto(`/organiser/events/${HEADLINE_ID}/checkin`);
       await expect(page.getByRole("heading", { name: "Scan a ticket" })).toBeVisible();
+      // Someone is already in (a fixture): the page used to fail to load from the first check-in on.
+      await expect(page.getByRole("list", { name: "Recent check-ins" }).getByRole("listitem")).toHaveCount(1);
       await audit(page, "Scanner, ready");
       await expectVisibleFocus(page, "Scanner, ready");
 
