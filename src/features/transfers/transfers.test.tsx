@@ -11,10 +11,22 @@ import { ResaleListingCard } from "./resale-listing-card";
 import { TicketTransferPanel } from "./ticket-transfer-panel";
 
 // The approval itself is Agent B's component; here it just reports the wallet's answer.
-const approvalOutcome = vi.hoisted(() => ({ status: "CONFIRMED" as TransactionRequest["status"] }));
+const approvalOutcome = vi.hoisted(() => ({
+  status: "CONFIRMED" as TransactionRequest["status"],
+  failureReason: null as TransactionRequest["failureReason"],
+}));
 vi.mock("@/features/wallet/transaction-approval", () => ({
   TransactionApproval: (props: { request: TransactionRequest; onFinished?: (r: TransactionRequest) => void }) => (
-    <button type="button" onClick={() => props.onFinished?.({ ...props.request, status: approvalOutcome.status })}>
+    <button
+      type="button"
+      onClick={() =>
+        props.onFinished?.({
+          ...props.request,
+          status: approvalOutcome.status,
+          failureReason: approvalOutcome.failureReason,
+        })
+      }
+    >
       Finish approval
     </button>
   ),
@@ -42,6 +54,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   approvalOutcome.status = "CONFIRMED";
+  approvalOutcome.failureReason = null;
 });
 
 function sentRequest(i = 0) {
@@ -239,6 +252,51 @@ describe("AcceptOffer", () => {
     await user.click(screen.getByRole("button", { name: "Buy for 3 XRP" }));
     await user.click(await screen.findByRole("button", { name: "Finish approval" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("no longer open"));
+  });
+
+  it("tells a buyer who lost a resale ticket to someone else, and points to the event's other listings (XRPL-035)", async () => {
+    const user = userEvent.setup();
+    approvalOutcome.status = "FAILED";
+    approvalOutcome.failureReason = "LEDGER_REJECTED";
+    fetchMock
+      .mockReturnValueOnce(json({ offerId: OFFER, amountDrops: "3000000", request }, 201))
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "STALE", "3000000", null), nftExplorerUrl: "", acceptTxExplorerUrl: null }));
+    render(<AcceptOffer offerId={OFFER} kind="RESALE" amountDrops="3000000" otherTicketsHref="/resale?eventId=e1" />);
+
+    await user.click(screen.getByRole("button", { name: "Buy for 3 XRP" }));
+    await user.click(await screen.findByRole("button", { name: "Finish approval" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Someone else got this ticket first, so your approval didn't go through. You paid only the small network fee.",
+      ),
+    );
+    expect(screen.getByRole("link", { name: "See other resale tickets" })).toHaveAttribute("href", "/resale?eventId=e1");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("doesn't offer the same offer again when the server says the ticket is taken (XRPL-035)", async () => {
+    const user = userEvent.setup();
+    const message = "Someone is buying this ticket right now. Pick another one, or try again in a few minutes.";
+    fetchMock.mockReturnValueOnce(json({ code: "CONFLICT", message, details: { reason: "PURCHASE_IN_FLIGHT" } }, 409));
+    render(<AcceptOffer offerId={OFFER} kind="RESALE" amountDrops="3000000" otherTicketsHref="/resale?eventId=e1" />);
+
+    await user.click(screen.getByRole("button", { name: "Buy for 3 XRP" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("link", { name: "See other resale tickets" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("still offers to try again when the refusal isn't about the ticket (XRPL-035)", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReturnValueOnce(
+      json({ code: "CONFLICT", message: "Not enough XRP", details: { reason: "WALLET_NOT_READY" } }, 409),
+    );
+    render(<AcceptOffer offerId={OFFER} kind="GIFT" amountDrops="0" />);
+
+    await user.click(screen.getByRole("button", { name: "Accept the gift" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Not enough XRP");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
   });
 });
 

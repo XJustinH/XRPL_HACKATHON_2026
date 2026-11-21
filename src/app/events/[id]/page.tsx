@@ -55,8 +55,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
    * A failure must read as "unknown", never as "available".
    */
   const reads = eventPageReads();
-  const [session, availability, offers, resale] = await Promise.all([
-    getCurrentSession().catch(() => null),
+  // First, because the offers depend on who is looking: a ticket another buyer is in the middle of
+  // buying isn't offered, but the buyer's own purchase in flight doesn't hide theirs (XRPL-035).
+  const session = await getCurrentSession().catch(() => null);
+  const [availability, offers, resale] = await Promise.all([
     reads
       .availability(id)
       .catch((error: unknown) => {
@@ -64,7 +66,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         return null;
       }),
     reads
-      .primaryOffers(id)
+      .primaryOffers(id, session?.walletAddress)
       .catch((error: unknown) => {
         console.error("[events] primary offers unavailable", error);
         return null;

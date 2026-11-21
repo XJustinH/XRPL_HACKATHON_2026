@@ -28,6 +28,7 @@ export type TierPurchaseState = {
   blockedReason:
     | "SOLD_OUT"
     | "NO_LIVE_OFFER"
+    | "BEING_BOUGHT"
     | "EVENT_STARTED"
     | "NOT_PUBLISHED"
     | null;
@@ -39,11 +40,16 @@ const MESSAGES: Record<NonNullable<TierPurchaseState["blockedReason"]>, string> 
   SOLD_OUT: "Sold out",
   // Stock may exist that the organiser has not minted or listed yet.
   NO_LIVE_OFFER: "Not on sale right now",
+  // Every ticket on sale has another buyer's purchase in flight (XRPL-035).
+  BEING_BOUGHT: "Being bought right now",
   EVENT_STARTED: "This event has already started",
   NOT_PUBLISHED: "This event is not on sale",
 };
 
-/** Cheapest live offer for a tier, or null. Offers arrive cheapest-first. */
+/**
+ * The offer a buy action would take for a tier, or null: the cheapest one nobody else is in the
+ * middle of buying, or failing that the cheapest one (XRPL-035).
+ */
 export function cheapestOfferForTier(
   offers: readonly PrimaryOfferListing[],
   tierId: string,
@@ -51,7 +57,9 @@ export function cheapestOfferForTier(
   let best: PrimaryOfferListing | null = null;
   for (const offer of offers) {
     if (offer.tierId !== tierId) continue;
-    if (best === null || BigInt(offer.amountDrops) < BigInt(best.amountDrops)) best = offer;
+    if (best === null) best = offer;
+    else if (offer.purchasePending !== best.purchasePending) best = best.purchasePending ? offer : best;
+    else if (BigInt(offer.amountDrops) < BigInt(best.amountDrops)) best = offer;
   }
   return best;
 }
@@ -73,6 +81,7 @@ export function tierPurchaseState(
   else if (context.hasStarted) blockedReason = "EVENT_STARTED";
   else if (tier.remaining <= 0) blockedReason = "SOLD_OUT";
   else if (offer === null) blockedReason = "NO_LIVE_OFFER";
+  else if (offer.purchasePending) blockedReason = "BEING_BOUGHT";
 
   return {
     tierId: tier.tierId,

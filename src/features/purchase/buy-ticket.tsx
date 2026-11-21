@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
-import type {
-  OfferStatus,
-  PrimaryOfferListing,
-  PurchaseRequestResult,
-  TransactionRequest,
+import {
+  TICKET_TAKEN_REASONS,
+  type OfferStatus,
+  type PrimaryOfferListing,
+  type PurchaseRefusalReason,
+  type PurchaseRequestResult,
+  type TransactionRequest,
 } from "@/contracts/xrpl";
 import { notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
@@ -19,6 +22,8 @@ class ApiError extends Error {
     message: string,
     /** False when no response arrived, so the same request may be retried with the same key. */
     readonly responded: boolean,
+    /** Why the server refused, when it said (`details.reason`). */
+    readonly reason: string | null = null,
   ) {
     super(message);
   }
@@ -35,12 +40,26 @@ async function callApi<T>(input: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiError("Could not reach the server. Check your connection and try again.", false);
   }
-  const body = (await response.json().catch(() => ({}))) as { data?: T; error?: { message?: string } };
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: T;
+    error?: { message?: string; details?: { reason?: unknown } | null };
+  };
   if (!response.ok || body.data === undefined) {
-    throw new ApiError(body.error?.message ?? `Request failed (HTTP ${response.status})`, true);
+    const reason = body.error?.details?.reason;
+    throw new ApiError(
+      body.error?.message ?? `Request failed (HTTP ${response.status})`,
+      true,
+      typeof reason === "string" ? reason : null,
+    );
   }
   return body.data;
 }
+
+/** The server refused because this ticket went to, or is going to, someone else (XRPL-035). */
+const ticketTaken = (error: unknown) =>
+  error instanceof ApiError &&
+  error.reason !== null &&
+  TICKET_TAKEN_REASONS.includes(error.reason as PurchaseRefusalReason);
 
 /** Random key for `Idempotency-Key`. getRandomValues works on plain-http LAN addresses too. */
 function newIdempotencyKey(): string {
@@ -65,6 +84,11 @@ type State =
  * `buyerAddress` is the session's proven wallet (XRPL-012), passed by the server page; without
  * one the component asks the buyer to connect instead of failing a sale. Agent C's checkout
  * (XRPL-030) can render it for the offer the buyer picked.
+ *
+ * When another buyer gets the ticket first (XRPL-035), before or after this buyer's approval, it
+ * says so and offers **See what's available now**. That refreshes the page, which picks the next
+ * ticket on sale or says the ticket type is sold out. Render it with `key={offer.offerId}`, so the
+ * next ticket starts a clean purchase.
  */
 export function BuyTicket({
   offer,
@@ -75,6 +99,7 @@ export function BuyTicket({
   buyerAddress: string | null;
   pollIntervalMs?: number;
 }) {
+  const router = useRouter();
   const [state, setState] = useState<State>({ phase: "idle" });
   /** Key of a request that got no response, reused when the buyer tries again. */
   const unanswered = useRef<string | null>(null);
@@ -94,11 +119,11 @@ export function BuyTicket({
     } catch (error) {
       const responded = !(error instanceof ApiError) || error.responded;
       unanswered.current = responded ? null : key;
-      setState({
-        phase: "error",
-        message: error instanceof Error ? error.message : "Could not start the purchase.",
-        retryable: true,
-      });
+      const message = error instanceof Error ? error.message : "Could not start the purchase.";
+      // Trying the same ticket again can't work when it went to someone else: offer another instead.
+      setState(
+        ticketTaken(error) ? { phase: "unavailable", message } : { phase: "error", message, retryable: true },
+      );
     }
   };
 
@@ -114,7 +139,11 @@ export function BuyTicket({
       } else {
         setState({
           phase: "unavailable",
-          message: "This ticket was sold to someone else. Pick another one.",
+          // The offer is closed and this buyer doesn't hold the ticket: it went elsewhere.
+          message:
+            request.failureReason === "LEDGER_REJECTED"
+              ? "Someone else got this ticket first, so your purchase didn't go through. You paid only the small network fee, not the ticket price."
+              : "This ticket went to someone else before you approved. You weren't charged.",
         });
       }
     } catch (error) {
@@ -199,9 +228,17 @@ export function BuyTicket({
       );
     case "unavailable":
       return (
-        <p role="alert" className={notice.caution}>
-          {state.message}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className={notice.caution}>
+            {state.message}
+          </p>
+          <div>
+            {/* The page picks the next ticket on sale, or says this ticket type has sold out. */}
+            <button type="button" onClick={() => router.refresh()} className={primaryButton}>
+              See what&apos;s available now
+            </button>
+          </div>
+        </div>
       );
     case "error":
       return (

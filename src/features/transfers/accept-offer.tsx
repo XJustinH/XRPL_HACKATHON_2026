@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
-import type { OfferStatus, PurchaseRequestResult, TransactionRequest } from "@/contracts/xrpl";
+import {
+  TICKET_TAKEN_REASONS,
+  type OfferStatus,
+  type PurchaseRefusalReason,
+  type PurchaseRequestResult,
+  type TransactionRequest,
+} from "@/contracts/xrpl";
 import { notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
@@ -17,23 +23,31 @@ type State =
   | { phase: "approving"; result: PurchaseRequestResult }
   | { phase: "checking" }
   | { phase: "done"; status: OfferStatus }
-  | { phase: "gone" }
+  | { phase: "gone"; message: string }
   | { phase: "error"; message: string };
+
+const GONE_MESSAGE = "This offer is no longer open. The ticket may have been taken or the offer withdrawn.";
 
 /**
  * Accepting a holder's offer: buying a resale ticket (XRPL-039), or taking a private sale or gift
  * addressed to this wallet (XRPL-040/041). The accepter approves an `NFTokenAcceptOffer` in Xaman;
  * the ticket is theirs only once the ledger validated it (read back from `GET /api/offers/:id`).
+ *
+ * When the ticket goes to someone else first (XRPL-035), it says so instead of offering to try the
+ * same offer again, and links to `otherTicketsHref` (the event's other resale tickets) when given.
  */
 export function AcceptOffer({
   offerId,
   kind,
   amountDrops,
+  otherTicketsHref,
   pollIntervalMs,
 }: {
   offerId: string;
   kind: "RESALE" | "PRIVATE" | "GIFT";
   amountDrops: string;
+  /** Where a buyer who lost a resale ticket can look for another. */
+  otherTicketsHref?: string;
   pollIntervalMs?: number;
 }) {
   const [state, setState] = useState<State>({ phase: "idle" });
@@ -53,7 +67,13 @@ export function AcceptOffer({
       setState({ phase: "approving", result });
     } catch (error) {
       unanswered.current = error instanceof ApiError && !error.responded ? key : null;
-      setState({ phase: "error", message: error instanceof Error ? error.message : "Could not start." });
+      const message = error instanceof Error ? error.message : "Could not start.";
+      // Trying the same offer again can't work when the ticket went to someone else.
+      const taken =
+        error instanceof ApiError &&
+        error.reason !== null &&
+        TICKET_TAKEN_REASONS.includes(error.reason as PurchaseRefusalReason);
+      setState(taken ? { phase: "gone", message } : { phase: "error", message });
     }
   };
 
@@ -63,7 +83,15 @@ export function AcceptOffer({
       const status = await callApi<OfferStatus>(`/api/offers/${offerId}`);
       if (request.status === "CONFIRMED" && status.offer.state === "ACCEPTED") setState({ phase: "done", status });
       else if (status.offer.state === "ACTIVE") setState({ phase: "idle" });
-      else setState({ phase: "gone" });
+      else {
+        setState({
+          phase: "gone",
+          message:
+            request.failureReason === "LEDGER_REJECTED"
+              ? "Someone else got this ticket first, so your approval didn't go through. You paid only the small network fee."
+              : GONE_MESSAGE,
+        });
+      }
     } catch (error) {
       setState({ phase: "error", message: error instanceof Error ? error.message : "Could not check the result." });
     }
@@ -123,9 +151,18 @@ export function AcceptOffer({
       );
     case "gone":
       return (
-        <p role="alert" className={notice.caution}>
-          This offer is no longer open. The ticket may have been taken or the offer withdrawn.
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className={notice.caution}>
+            {state.message}
+          </p>
+          {otherTicketsHref ? (
+            <div>
+              <Link href={otherTicketsHref} className={primaryButton}>
+                See other resale tickets
+              </Link>
+            </div>
+          ) : null}
+        </div>
       );
     case "error":
       return (

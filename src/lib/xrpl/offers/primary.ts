@@ -394,12 +394,17 @@ export async function reconcileEventPrimaryOffers(deps: OfferDeps, eventId: stri
  * Live primary offers for an event, cheapest first: ACTIVE, not expired, on unsold minted
  * tickets. Satisfies Agent C's `OfferPort.listPrimaryOffers` (each item has its fields).
  * A listed offer can still have been taken on the ledger since; buyers re-check it (XRPL-031/035).
+ *
+ * An offer another buyer is in the middle of buying is marked `purchasePending` and listed after the
+ * free ones at its price (XRPL-035), so the next buyer is given a ticket they can actually buy.
+ * `viewerAddress` is the reader's own wallet: their own purchase in flight doesn't count.
  */
 export async function listPrimaryOffers(
-  db: Pick<PrismaClient, "nFTOffer">,
+  db: Pick<PrismaClient, "nFTOffer" | "ledgerTransaction">,
   eventId: string,
-  now = new Date(),
+  options: { now?: Date; viewerAddress?: string | null } = {},
 ): Promise<PrimaryOfferListing[]> {
+  const now = options.now ?? new Date();
   const offers = await db.nFTOffer.findMany({
     where: {
       kind: "PRIMARY",
@@ -410,6 +415,25 @@ export async function listPrimaryOffers(
     },
     include: { ticket: { select: { id: true, serial: true, tier: { select: { id: true, name: true } } } } },
   });
+  // Purchases in flight. An older one can't be signed any more, and the next attempt to buy its
+  // ticket settles it, so it doesn't keep the ticket out of reach.
+  const inFlight =
+    offers.length === 0
+      ? []
+      : await db.ledgerTransaction.findMany({
+          where: {
+            relatedOfferId: { in: offers.map((offer) => offer.id) },
+            type: "NFTokenAcceptOffer",
+            status: "PENDING",
+            appliedAt: null,
+            createdAt: { gt: new Date(now.getTime() - UNSIGNABLE_AFTER_MS) },
+          },
+          select: { relatedOfferId: true, account: true },
+        });
+  const viewer = options.viewerAddress ?? null;
+  const held = new Set(
+    inFlight.filter((t) => viewer === null || t.account !== viewer).map((t) => t.relatedOfferId),
+  );
   return offers
     .filter((offer) => offer.ticket !== null)
     .map((offer) => ({
@@ -423,10 +447,12 @@ export async function listPrimaryOffers(
       ticketId: offer.ticket!.id,
       serial: offer.ticket!.serial,
       expiresAt: offer.expiresAt ? offer.expiresAt.toISOString() : null,
+      purchasePending: held.has(offer.id),
     }))
     .sort((a, b) => {
       const diff = BigInt(a.amountDrops) - BigInt(b.amountDrops);
       if (diff !== BigInt(0)) return diff < BigInt(0) ? -1 : 1;
+      if (a.purchasePending !== b.purchasePending) return a.purchasePending ? 1 : -1;
       return a.serial - b.serial;
     });
 }
@@ -446,7 +472,7 @@ export async function getEventPrimaryOffers(
   const isOwner = !!input.session && event?.sellerId === input.session.userId;
   if (!event || (event.status !== "PUBLISHED" && !isOwner)) throw errors.notFound("Event not found");
   if (isOwner) await reconcileEventPrimaryOffers(deps, input.eventId);
-  return listPrimaryOffers(deps.db, input.eventId);
+  return listPrimaryOffers(deps.db, input.eventId, { viewerAddress: input.session?.walletAddress });
 }
 
 /** Same as `reconcilePrimaryOffer`, named for offers of any kind (XRPL-036/040/041). */
