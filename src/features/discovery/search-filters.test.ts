@@ -70,6 +70,23 @@ describe("parseSearchParams", () => {
     expect(parseSearchParams({ cursor: "abc" }).filters.cursor).toBe("abc");
   });
 
+  it("filters by a known category, and drops an unknown one without losing the others", () => {
+    const known = parseSearchParams({ category: "COMEDY", city: "Dublin" });
+    expect(known.filters).toMatchObject({ category: "COMEDY", city: "Dublin" });
+    expect(known.form.category).toBe("COMEDY");
+    expect(known.hasFilters).toBe(true);
+
+    const unknown = parseSearchParams({ category: "OPERA", city: "Dublin" });
+    expect(unknown.filters).not.toHaveProperty("category");
+    expect(unknown.filters.city).toBe("Dublin");
+    expect(unknown.form.category).toBe("");
+  });
+
+  it("keeps the category in the query string", () => {
+    const { form } = parseSearchParams({ category: "MUSIC" });
+    expect(new URLSearchParams(searchQueryString(form).slice(1)).get("category")).toBe("MUSIC");
+  });
+
   it("does not treat a cursor alone as an active filter", () => {
     // Otherwise page two would always offer "Clear filters".
     expect(parseSearchParams({ cursor: "abc" }).hasFilters).toBe(false);
@@ -84,6 +101,7 @@ describe("searchQueryString", () => {
     fromDate: "2026-12-01",
     toDate: "",
     sellerId: "",
+    category: "",
   };
 
   it("preserves active filters and adds the cursor", () => {
@@ -104,7 +122,7 @@ describe("searchQueryString", () => {
 
   it("returns an empty string when nothing is set", () => {
     expect(
-      searchQueryString({ q: "", city: "", venue: "", fromDate: "", toDate: "", sellerId: "" }),
+      searchQueryString({ q: "", city: "", venue: "", fromDate: "", toDate: "", sellerId: "", category: "" }),
     ).toBe("");
   });
 

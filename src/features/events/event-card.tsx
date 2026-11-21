@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { safeExternalUrl, type EventView } from "@/contracts";
+import { EVENT_CATEGORY_LABELS, safeExternalUrl, type EventView } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
 import { formatEventDate, formatXrp, lowestPriceDrops } from "./event-formatting";
 
@@ -60,6 +60,7 @@ export function EventCard({ event }: { event: EventView }) {
             ) : (
               <Badge>Price to be announced</Badge>
             )}
+            {event.category ? <Badge>{EVENT_CATEGORY_LABELS[event.category]}</Badge> : null}
             {totalSupply > 0 ? (
               <span className="text-xs text-muted">
                 {totalSupply} {totalSupply === 1 ? "ticket" : "tickets"}

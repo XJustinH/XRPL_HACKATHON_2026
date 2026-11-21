@@ -131,12 +131,16 @@ describe("EventQuery", () => {
     expect(parsed.venue).toBe("Vicar Street");
   });
 
+  it("filters by a category from the fixed vocabulary, and nothing else", () => {
+    expect(EventQuery.parse({ category: "COMEDY" }).category).toBe("COMEDY");
+    expect(EventQuery.safeParse({ category: "comedy" }).success).toBe(false);
+    expect(EventQuery.safeParse({ category: "Opera" }).success).toBe(false);
+  });
+
   it("omits filters that cannot be honoured yet, rather than ignoring them", () => {
     // A filter that parses but does nothing looks like a working control.
-    // `category` needs an Event.category column; `maxPriceDrops` needs a
-    // numeric price column, since drops are stored as a decimal string.
-    const parsed = EventQuery.parse({});
-    expect(parsed).not.toHaveProperty("category");
+    // `maxPriceDrops` isn't wired yet (TicketTier.priceDropsNumeric makes it possible).
+    const parsed = EventQuery.parse({ maxPriceDrops: "1000000", sort: "PRICE_ASC" });
     expect(parsed).not.toHaveProperty("maxPriceDrops");
     expect(parsed).not.toHaveProperty("sort");
   });

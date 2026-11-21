@@ -38,6 +38,7 @@ function event(tiers: TicketTierView[]): EventView {
     city: "Dublin",
     status: "DRAFT",
     artworkUrl: null,
+    category: null,
     tiers,
     publishedAt: null,
   };

@@ -1,4 +1,4 @@
-import { EventQuery } from "@/contracts";
+import { EventCategory, EventQuery } from "@/contracts";
 import type { EventListOptions } from "@/features/events/event-store";
 
 /**
@@ -28,6 +28,8 @@ export type ParsedSearch = {
     fromDate: string;
     toDate: string;
     sellerId: string;
+    /** A vocabulary value, or "" for any category. */
+    category: string;
   };
   /** True when at least one filter is active, so "Clear" can be offered. */
   hasFilters: boolean;
@@ -52,6 +54,8 @@ export function parseSearchParams(params: SearchParams): ParsedSearch {
     fromDate: first(params.from).slice(0, 10),
     toDate: first(params.to).slice(0, 10),
     sellerId: first(params.sellerId),
+    // Only a vocabulary value: an unknown one is dropped rather than failing every filter.
+    category: EventCategory.safeParse(first(params.category)).data ?? "",
   };
 
   const candidate = {
@@ -61,6 +65,7 @@ export function parseSearchParams(params: SearchParams): ParsedSearch {
     ...(dayBoundary(form.fromDate, false) ? { from: dayBoundary(form.fromDate, false) } : {}),
     ...(dayBoundary(form.toDate, true) ? { to: dayBoundary(form.toDate, true) } : {}),
     ...(form.sellerId.trim() ? { sellerId: form.sellerId.trim() } : {}),
+    ...(form.category ? { category: form.category } : {}),
     ...(first(params.cursor) ? { cursor: first(params.cursor) } : {}),
   };
 
@@ -76,7 +81,8 @@ export function parseSearchParams(params: SearchParams): ParsedSearch {
       form.venue.trim() ||
       form.fromDate ||
       form.toDate ||
-      form.sellerId.trim(),
+      form.sellerId.trim() ||
+      form.category,
   );
 
   return { filters, form, hasFilters };
@@ -94,6 +100,7 @@ export function searchQueryString(
   if (form.fromDate) params.set("from", form.fromDate);
   if (form.toDate) params.set("to", form.toDate);
   if (form.sellerId.trim()) params.set("sellerId", form.sellerId.trim());
+  if (form.category) params.set("category", form.category);
   if (cursor) params.set("cursor", cursor);
   const text = params.toString();
   return text ? `?${text}` : "";

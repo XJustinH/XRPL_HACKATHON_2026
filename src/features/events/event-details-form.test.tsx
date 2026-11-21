@@ -37,6 +37,7 @@ function event(overrides: Partial<EventView> = {}): EventView {
     city: "Dublin",
     status: "DRAFT",
     artworkUrl: null,
+    category: null,
     tiers: [tier()],
     publishedAt: null,
     ...overrides,
@@ -121,11 +122,18 @@ describe("EventDetailsForm", () => {
       expect(screen.getByText(/cannot be rewritten/)).toBeVisible();
     });
 
-    it("offers no save button, since nothing is editable", () => {
-      // A visible control that can only ever submit an empty patch is worse
-      // than no control.
+    it("keeps the category editable, since it isn't in the tickets' metadata, and sends only it", async () => {
+      const user = userEvent.setup();
       render(<EventDetailsForm event={minted} />);
+      expect(screen.getByLabelText("Category")).toBeEnabled();
       expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText("Category"), "COMEDY");
+      await user.click(screen.getByRole("button", { name: "Save category" }));
+
+      expect(requestJson).toHaveBeenCalledTimes(1);
+      const [, init] = requestJson.mock.calls[0]!;
+      expect(init.body).toEqual({ category: "COMEDY" });
     });
 
     it("still surfaces a server refusal if a frozen field reaches the API", async () => {
@@ -140,6 +148,18 @@ describe("EventDetailsForm", () => {
       render(<EventDetailsForm event={minted} />);
       expect(screen.getByLabelText("Venue")).toBeDisabled();
     });
+  });
+
+  it("pre-selects the current category, and clears it with No category", async () => {
+    const user = userEvent.setup();
+    render(<EventDetailsForm event={event({ category: "MUSIC" })} />);
+    expect(screen.getByLabelText("Category")).toHaveValue("MUSIC");
+
+    await user.selectOptions(screen.getByLabelText("Category"), "");
+    await user.click(save());
+
+    const [, init] = requestJson.mock.calls[0]!;
+    expect(init.body).toMatchObject({ category: null });
   });
 
   it("surfaces a server error and keeps the edited values", async () => {

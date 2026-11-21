@@ -1,6 +1,6 @@
 import Link from "next/link";
-import type { EventView, Page } from "@/contracts";
-import { EmptyState, NotImplementedNotice } from "@/components/ui/empty-state";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_LABELS, type EventView, type Page } from "@/contracts";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { getDb } from "@/lib/db/client";
 import { listPublishedEvents } from "@/features/events/event-store";
@@ -54,7 +54,7 @@ export default async function SearchPage({
     <>
       <PageHeader
         title="Search events"
-        description="Find published events by name, city, venue, date or organiser."
+        description="Find published events by name, category, city, venue, date or organiser."
       />
 
       {form.sellerId ? (
@@ -130,6 +130,20 @@ export default async function SearchPage({
             />
           </div>
 
+          <div className="sm:col-span-2">
+            <label htmlFor="category" className={labelClass}>
+              Category
+            </label>
+            <select id="category" name="category" defaultValue={form.category} className={inputClass}>
+              <option value="">Any category</option>
+              {EVENT_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {EVENT_CATEGORY_LABELS[category]}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label htmlFor="from" className={labelClass}>
               From date
@@ -180,13 +194,6 @@ export default async function SearchPage({
           ) : null}
         </div>
       </form>
-
-      <div className="mt-6">
-        <NotImplementedNotice
-          title="Filter by category"
-          blockedBy="an Event.category column, which the schema does not have yet; the category vocabulary already exists from XRPL-058"
-        />
-      </div>
 
       <section aria-labelledby="results-heading" className="mt-8">
         <h2 id="results-heading" className="mb-4 text-lg font-semibold">

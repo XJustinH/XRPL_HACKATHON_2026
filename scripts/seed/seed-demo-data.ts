@@ -66,6 +66,13 @@ export async function seedDemoData(db: PrismaClient): Promise<SeedSummary> {
       where: { id: { in: ids(demoUsers) }, isDemo: false },
       data: { isDemo: true },
     });
+    // Demo events seeded before events had a category get one; a category set since is kept.
+    for (const event of demoEvents) {
+      await tx.event.updateMany({
+        where: { id: event.id, category: null },
+        data: { category: event.category },
+      });
+    }
 
     assertAllPresent(
       "user",
