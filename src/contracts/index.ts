@@ -12,6 +12,7 @@
  *   xrpl.ts      — Agent B   (ledger results, ownership, sign requests, offers)
  *   checkin.ts   — Agent D   (challenge, proof, CheckInResult, resale eligibility)
  *   friends.ts   — Agent D   (friend connections, blocks, friend-list visibility)
+ *   reviews.ts   — Agent D   (event reviews: input, views, eligibility)
  *   commerce.ts  — Agent E
  *   community.ts — Agent E
  *
@@ -28,3 +29,4 @@ export * from "./checkin";
 export * from "./inventory";
 export * from "./commerce";
 export * from "./friends";
+export * from "./reviews";
