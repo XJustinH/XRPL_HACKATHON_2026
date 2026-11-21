@@ -28,6 +28,10 @@ const PURPOSE_TRANSACTION_TYPES: Record<TransactionPurpose, string> = {
   MINT_TICKET: "NFTokenMint",
   CREATE_PRIMARY_OFFER: "NFTokenCreateOffer",
   ACCEPT_PRIMARY_OFFER: "NFTokenAcceptOffer",
+  CREATE_RESALE_OFFER: "NFTokenCreateOffer",
+  CREATE_PRIVATE_OFFER: "NFTokenCreateOffer",
+  CREATE_GIFT_OFFER: "NFTokenCreateOffer",
+  ACCEPT_TRANSFER_OFFER: "NFTokenAcceptOffer",
 };
 
 const RequestMeta = z.object({

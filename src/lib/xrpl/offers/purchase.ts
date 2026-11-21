@@ -12,6 +12,7 @@ import { explorerNftUrl, explorerTxUrl } from "../explorer";
 import { formatDropsAsXrp } from "../format";
 import type { XrplQueryService } from "../query";
 import { getWalletReadiness } from "../wallet/readiness";
+import { reconcileOfferCreation } from "./primary";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
 
 /**
@@ -23,6 +24,11 @@ import type { WalletTransactionRequests } from "../wallet/transaction-requests";
  *   be able to pay. A ticket has one purchase in flight at a time.
  * - A declined, expired, cancelled or failed purchase re-checks the ledger: if the offer is
  *   still there the ticket stays available, otherwise the offer is marked STALE.
+ *
+ * The same flow accepts a holder's offers (XRPL-039/040/041):
+ * - a RESALE offer only while the in-app resale rule lists it publicly (`resalePolicy`, XRPL-037);
+ * - a PRIVATE sale or GIFT only from the wallet it names (the ledger enforces this too).
+ * Those change the ticket's owner but not its primary sale.
  */
 
 export interface PurchaseDeps {
@@ -33,6 +39,11 @@ export interface PurchaseDeps {
     "getValidatedTx" | "verifyOwner" | "getOffers" | "getAccountInfo" | "getReserves"
   >;
   config: Pick<XrplConfig, "network" | "explorerUrl" | "networkLabel">;
+  /**
+   * The in-app resale rule (XRPL-037): resolves the offer only while it is publicly listed.
+   * Without it, resale offers can't be bought here (fail closed).
+   */
+  resalePolicy?: () => { getPublicOffer(eventId: string, offerId: string): Promise<unknown | null> };
 }
 
 /** What reconciling purchases needs: no balance reads, so any ticket service's deps will do. */
@@ -62,7 +73,8 @@ async function isLiveOnLedger(deps: ReconcileDeps, offer: NFTOffer): Promise<boo
     !onLedger ||
     onLedger.owner !== offer.ownerAddress ||
     onLedger.amountDrops !== offer.amountDrops ||
-    onLedger.destination
+    // Same Destination as recorded: none for primary and resale, the recipient for private sales and gifts.
+    (onLedger.destination ?? null) !== (offer.destinationAddress ?? null)
   ) {
     return false;
   }
@@ -90,15 +102,23 @@ export async function requestPurchase(
       },
     },
   });
-  // Resale (XRPL-039) and private offers (XRPL-040) are not sold through this flow yet.
-  if (!offer || offer.kind !== "PRIMARY" || !offer.ticket || offer.ticket.event.status !== "PUBLISHED") {
+  if (!offer || !offer.ticket || offer.ticket.event.status !== "PUBLISHED") {
     throw errors.notFound("Offer not found");
   }
   const ticket = offer.ticket;
-  if (offer.state !== "ACTIVE" || !offer.offerIndex || ticket.primarySoldAt) {
+  // A private sale or gift is only visible to the wallet it names.
+  if ((offer.kind === "PRIVATE" || offer.kind === "GIFT") && offer.destinationAddress !== buyer) {
+    throw errors.notFound("Offer not found");
+  }
+  if (offer.state !== "ACTIVE" || !offer.offerIndex || (offer.kind === "PRIMARY" && ticket.primarySoldAt)) {
     throw errors.conflict("This ticket is no longer for sale");
   }
   if (buyer === offer.ownerAddress) throw errors.conflict("You can't buy a ticket from your own wallet");
+  // A resale offer can be bought here only while the in-app resale rule lists it (XRPL-037).
+  if (offer.kind === "RESALE") {
+    const listed = deps.resalePolicy ? await deps.resalePolicy().getPublicOffer(ticket.eventId, offer.id) : null;
+    if (!listed) throw errors.notFound("Offer not found");
+  }
 
   const readiness = await getWalletReadiness(deps.ledger(), deps.config, {
     address: buyer,
@@ -151,7 +171,7 @@ export async function requestPurchase(
   let request: TransactionRequest;
   try {
     request = await deps.transactions().create({
-      purpose: "ACCEPT_PRIMARY_OFFER",
+      purpose: offer.kind === "PRIMARY" ? "ACCEPT_PRIMARY_OFFER" : "ACCEPT_TRANSFER_OFFER",
       txjson: {
         TransactionType: "NFTokenAcceptOffer",
         Account: buyer,
@@ -166,7 +186,9 @@ export async function requestPurchase(
         ],
       },
       instruction: truncate(
-        `Buy ticket: ${ticket.event.title} — ${ticket.tier.name} #${ticket.serial} for ${formatDropsAsXrp(offer.amountDrops)} XRP`,
+        offer.kind === "GIFT"
+          ? `Accept ticket gift: ${ticket.event.title} — ${ticket.tier.name} #${ticket.serial}`
+          : `Buy ticket: ${ticket.event.title} — ${ticket.tier.name} #${ticket.serial} for ${formatDropsAsXrp(offer.amountDrops)} XRP`,
         MAX_INSTRUCTION_LENGTH,
       ),
       reference: offer.id,
@@ -276,16 +298,21 @@ async function applyPurchase(
       data: { state: "ACCEPTED", acceptTxHash: confirmed.hash, acceptedByAddress: buyer, lastSyncedAt: now },
     });
     if (offer.ticketId) {
-      await tx.ticketNFT.updateMany({
-        where: { id: offer.ticketId, primarySoldAt: null },
-        data: {
-          primarySoldAt: soldAt,
-          cachedOwnerAddress: holding.owns ? buyer : null,
-          ownerSyncStatus: holding.owns ? "SYNCED" : "STALE",
-          ownerSyncedAt: now,
-          ownerSyncLedgerIndex: holding.provenance.ledgerIndex,
-        },
-      });
+      const owner = {
+        cachedOwnerAddress: holding.owns ? buyer : null,
+        ownerSyncStatus: holding.owns ? ("SYNCED" as const) : ("STALE" as const),
+        ownerSyncedAt: now,
+        ownerSyncLedgerIndex: holding.provenance.ledgerIndex,
+      };
+      if (offer.kind === "PRIMARY") {
+        await tx.ticketNFT.updateMany({
+          where: { id: offer.ticketId, primarySoldAt: null },
+          data: { primarySoldAt: soldAt, ...owner },
+        });
+      } else {
+        // A resale, private sale or gift moves the ticket to its new owner; the primary sale stays as it was.
+        await tx.ticketNFT.updateMany({ where: { id: offer.ticketId }, data: owner });
+      }
     }
   });
 }
@@ -357,13 +384,17 @@ async function ticketIdsOf(db: Pick<PrismaClient, "ticketNFT">, eventId: string)
   return tickets.map((t) => t.id);
 }
 
-/** An offer's state after reconciling its purchases in flight (`GET /api/offers/:id`). */
+/**
+ * An offer's state after reconciling it (`GET /api/offers/:id`): its creation while it awaits the
+ * holder's approval, then any purchases in flight.
+ */
 export async function getOfferStatus(
-  deps: ReconcileDeps & { config: Pick<XrplConfig, "explorerUrl"> },
+  deps: ReconcileDeps & { config: Pick<XrplConfig, "network" | "explorerUrl"> },
   offerId: string,
 ): Promise<OfferStatus> {
-  const exists = await deps.db.nFTOffer.findUnique({ where: { id: offerId }, select: { id: true } });
+  const exists = await deps.db.nFTOffer.findUnique({ where: { id: offerId }, select: { state: true } });
   if (!exists) throw errors.notFound("Offer not found");
+  if (exists.state === "PENDING_SIGNATURE") await reconcileOfferCreation(deps, offerId);
   await reconcileOfferPurchases(deps, offerId);
 
   const offer = await deps.db.nFTOffer.findUniqueOrThrow({
