@@ -36,6 +36,14 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 The test waits for each validated ledger outcome by polling until it is final (`support/wait.ts`), never
 for a fixed time.
 
+## Digital collectibles
+
+`collectibles.testnet.test.ts` (XRPL-073 to XRPL-075) runs the collectible flow the same way. A seller mints
+one edition, lists it for sale and another wallet buys it, each recorded only from its validated transaction.
+It checks that the NFT carries the collectible taxon and the edition's metadata URI, that the buyer's
+collection shows it after a ledger ownership check and the seller's doesn't, and that no ticket record is
+created.
+
 ## What is real and what is simulated
 
 - **Real:** the app's services and database code, XRPL Testnet, and the faucet.
