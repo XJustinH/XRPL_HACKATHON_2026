@@ -190,3 +190,4 @@ Pages: `/seller/collectibles`, `/collectibles/:id`, `/collectibles`. Mountable s
 - No idempotency keys on the intent routes; conditional claims prevent double purchases, and a repeated
   mint click would claim the next edition.
 - Royalties (`TransferFee`) are not set.
+- Collectible sales are summarised on `/seller/analytics` (XRPL-078, `docs/storefront-analytics.md`).

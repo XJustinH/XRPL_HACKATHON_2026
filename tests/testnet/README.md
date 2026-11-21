@@ -42,7 +42,8 @@ for a fixed time.
 one edition, lists it for sale and another wallet buys it, each recorded only from its validated transaction.
 It checks that the NFT carries the collectible taxon and the edition's metadata URI, that the buyer's
 collection shows it after a ledger ownership check and the seller's doesn't, and that no ticket record is
-created.
+created. The seller's storefront analytics (XRPL-078) then show one sale at the listed price, and
+reading that sale again from the ledger confirms it.
 
 ## What is real and what is simulated
 

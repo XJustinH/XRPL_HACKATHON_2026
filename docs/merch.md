@@ -151,4 +151,5 @@ CHECK constraints keep the order total and unit prices positive and quantities a
   device. Adding to the cart does not reserve stock: stock is taken only when the order is placed.
 - Photos are https links the seller pastes in. There is no upload (XRPL-070/071 covers uploads).
 - Order lists are not paginated, and there are no order notifications or emails.
-- Merchandise is not in the organiser analytics yet (XRPL-078).
+- Merchandise orders are summarised on `/seller/analytics` (XRPL-078, `docs/storefront-analytics.md`),
+  apart from ticket and collectible sales.

@@ -1,5 +1,6 @@
 import { parseNFTokenID } from "xrpl";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { checkSalesOnLedger, getStorefrontMetrics } from "@/features/analytics/storefront-metrics";
 import { uploadMediaAsset } from "@/features/collectibles/assets";
 import {
   getTokenStatus,
@@ -272,5 +273,30 @@ describe("digital collectibles on XRPL Testnet (XRPL-073 to XRPL-075)", () => {
     expect(await listOwnedCollectibles(deps, { address: seller.classicAddress })).toEqual([]);
     // Still no ticket records: the collection is collectibles only.
     expect(await db.ticketNFT.count()).toBe(0);
+  });
+
+  it("reports the sale in the seller's analytics, and the ledger confirms the transaction behind it (XRPL-078)", async () => {
+    const metrics = await getStorefrontMetrics(db, sellerId, config);
+    expect(metrics.collectibles).toMatchObject({
+      currency: "XRP",
+      settlement: "XRPL",
+      listings: 1,
+      editions: 1,
+      minted: 1,
+      forSale: 0,
+      sold: 1,
+      revenueDrops: PRICE_DROPS,
+      pending: { mints: 0, listings: 0, purchases: 0 },
+      reconciliation: { salesWithTransaction: 1, salesWithTransactionDrops: PRICE_DROPS, reconciled: true },
+    });
+    // A collectible sale is not a ticket sale or a merchandise order.
+    expect(metrics.tickets).toMatchObject({ sold: 0, revenueDrops: "0" });
+    expect(metrics.merchandise).toMatchObject({ orders: 0, orderValueDrops: "0" });
+
+    const [sale] = metrics.collectibles.sales;
+    expect(sale).toMatchObject({ tokenId, nftokenId, amountDrops: PRICE_DROPS });
+    // The recorded sale is read again from the ledger: validated, successful, and it moved this NFT.
+    const checks = await checkSalesOnLedger(ledger, metrics.collectibles.sales);
+    expect(checks).toEqual([{ txHash: sale?.txHash, outcome: "VALIDATED", ledgerIndex: expect.any(Number) }]);
   });
 });
