@@ -130,7 +130,8 @@ Limitations:
 ## Holder offers: resale, private sale, gift (XRPL-036, 039, 040, 041)
 
 A ticket's current holder can offer it on, signing an `NFTokenCreateOffer` (sell) in their own Xaman wallet.
-Code: `src/lib/xrpl/offers/holder.ts`.
+Code: `src/lib/xrpl/offers/holder.ts`. Screens (ticket page, offer page, resale listings):
+`src/features/transfers/README.md`.
 
 | Route | Body | Offer on the ledger | Who can accept |
 |---|---|---|---|
@@ -159,12 +160,15 @@ offer when it is read.
   a listing the app hides. Without the rule wired in, resale offers can't be bought here.
 - **Private sales and gifts** are visible only to the wallet they name. The ledger enforces the same
   restriction.
+- **Used tickets:** a ticket that has been checked in can't change hands, even through an offer made
+  before the check-in (409). The resale rule stops listing it too.
 - **On success:** a validated transfer moves the ticket to its new owner (`cachedOwnerAddress`).
   `primarySoldAt` stays as it was. Organiser metrics count private transfers and gifts separately from
   resales (XRPL-076).
 
 **Limitations:**
-- A gift or private sale can't be reversed once accepted. The UI must confirm before creating one.
+- A gift or private sale can't be reversed once accepted. The ticket page asks for confirmation before
+  creating a gift.
 - Cancelling an open offer is XRPL-042.
 - Offers made by a previous holder stay recorded as they were until reconciliation (XRPL-043). The ledger
   no longer lets anyone accept them once the NFT has moved.

@@ -36,7 +36,8 @@ export class PrismaResaleOffers implements Pick<OfferPort, "listResaleOffers"> {
         destinationAddress: null,
         offerIndex: { not: null },
         createTxHash: { not: null },
-        ticket: { eventId },
+        // A ticket already used to enter the event is no longer for sale, whatever its offer says.
+        ticket: { eventId, checkIns: { none: {} } },
       },
       select: {
         id: true,

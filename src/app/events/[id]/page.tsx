@@ -4,9 +4,8 @@ import type { Metadata } from "next";
 import { safeExternalUrl } from "@/contracts";
 import type { PrimaryAvailability } from "@/contracts/inventory";
 import type { PrimaryOfferListing } from "@/contracts/xrpl";
-import type { ResaleEligibility } from "@/contracts";
+import type { ResaleEligibility, ResaleListing } from "@/contracts";
 import { Badge } from "@/components/ui/badge";
-import { NotImplementedNotice } from "@/components/ui/empty-state";
 import { getDb } from "@/lib/db/client";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { eventPageReads } from "@/features/events/server-deps";
@@ -16,6 +15,7 @@ import { cityBrowseHref, venueBrowseHref } from "@/features/discovery/browse-lin
 import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
 import { TicketSelection } from "@/features/events/ticket-selection";
 import { EventReviews } from "@/features/reviews/event-reviews";
+import { ResaleListingCard } from "@/features/transfers/resale-listing-card";
 
 /**
  * Public event page with ticket selection (XRPL-019).
@@ -66,9 +66,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         return null;
       }),
     reads
-      .resaleEligibility(id)
+      .resale(id)
       .catch((error: unknown) => {
-        console.error("[events] resale eligibility unavailable", error);
+        console.error("[events] resale listings unavailable", error);
         return null;
       }),
   ]);
@@ -229,13 +229,23 @@ function PrimarySection({
   );
 }
 
+/** How many resale listings the event page shows before linking to the full list. */
+const RESALE_PREVIEW = 4;
+
+/**
+ * Resale tickets for this event (XRPL-038), only when the in-app resale rule allows them. The
+ * listings come through the rule too, so a hidden or stale offer never shows here.
+ */
 function ResaleSection({
   eventId,
   resale,
 }: {
   eventId: string;
-  resale: ResaleEligibility | null;
+  resale: { eligibility: ResaleEligibility; offers: ResaleListing[] } | null;
 }) {
+  const shown = resale?.offers.slice(0, RESALE_PREVIEW) ?? [];
+  const more = (resale?.offers.length ?? 0) - shown.length;
+
   return (
     <section aria-labelledby="resale-heading" className="mt-10">
       <h2 id="resale-heading" className="mb-4 text-lg font-semibold">
@@ -246,28 +256,36 @@ function ResaleSection({
         <p className="rounded-card border border-border bg-surface px-5 py-4 text-sm text-muted">
           Resale availability could not be checked just now.
         </p>
-      ) : resale.isPublicResaleAllowed ? (
-        <div className="rounded-card border border-border bg-surface-raised p-5">
-          <p className="text-sm text-muted">{resale.message}</p>
-          <Link
-            href={`/resale?eventId=${encodeURIComponent(eventId)}`}
-            className="mt-4 inline-block rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
-          >
-            Browse resale tickets
-          </Link>
-        </div>
-      ) : (
+      ) : !resale.eligibility.isPublicResaleAllowed ? (
         <p className="rounded-card border border-border bg-surface px-5 py-4 text-sm text-muted">
-          {resale.message}
+          {resale.eligibility.message}
         </p>
+      ) : (
+        <>
+          <p className="mb-4 text-sm text-muted">{resale.eligibility.message}</p>
+          {shown.length === 0 ? (
+            <p className="rounded-card border border-border bg-surface px-5 py-4 text-sm text-muted">
+              No one has listed a ticket for resale yet. Check back later.
+            </p>
+          ) : (
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {shown.map((listing) => (
+                <li key={listing.offerId}>
+                  <ResaleListingCard listing={listing} showEvent={false} />
+                </li>
+              ))}
+            </ul>
+          )}
+          {more > 0 ? (
+            <Link
+              href={`/resale?eventId=${encodeURIComponent(eventId)}`}
+              className="mt-4 inline-block rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
+            >
+              See all {resale.offers.length} resale tickets
+            </Link>
+          ) : null}
+        </>
       )}
-
-      <div className="mt-4">
-        <NotImplementedNotice
-          title="Resale listings on this page"
-          blockedBy="XRPL-038, which builds the public resale marketplace on top of this eligibility rule"
-        />
-      </div>
     </section>
   );
 }

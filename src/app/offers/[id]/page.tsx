@@ -91,7 +91,11 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
 
       {page.status === "CLOSED" ? (
         <p role="status" className={notice.caution}>
-          {offer.state === "ACCEPTED" ? "This offer has been accepted, so the ticket has moved." : "This offer is no longer open."}
+          {offer.state === "ACCEPTED"
+            ? "This offer has been accepted, so the ticket has moved."
+            : offer.used
+              ? "This ticket has already been used to enter the event, so it can't change hands."
+              : "This offer is no longer open."}
         </p>
       ) : own ? (
         <p className="text-sm text-muted">This is your own offer. Share this page&apos;s link with the person it&apos;s for.</p>

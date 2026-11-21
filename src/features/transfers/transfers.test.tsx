@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TransactionRequest } from "@/contracts/xrpl";
 
+import type { ResaleListing } from "@/contracts/events";
+
 import { AcceptOffer } from "./accept-offer";
+import { ResaleListingCard } from "./resale-listing-card";
 import { TicketTransferPanel } from "./ticket-transfer-panel";
 
 // The approval itself is Agent B's component; here it just reports the wallet's answer.
@@ -171,5 +174,43 @@ describe("AcceptOffer", () => {
     await user.click(screen.getByRole("button", { name: "Buy for 3 XRP" }));
     await user.click(await screen.findByRole("button", { name: "Finish approval" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("no longer open"));
+  });
+});
+
+describe("ResaleListingCard", () => {
+  const listing = {
+    offerId: OFFER,
+    offerIndex: "AED08CC1F50DD5F23A1948AF86153A3F3B7593E5EC77D65A02BB1B29E05AB6AF",
+    nftokenId: "000800006203F49C21D5D6E022CB16DE3538F248662FC73C00000001",
+    sellerAddress: HOLDER,
+    amountDrops: "3500000",
+    kind: "RESALE",
+    state: "ACTIVE",
+    createTxHash: "C53ECF838647FA5A4C780377025FEC7999AB4182590510CA461444B207AB74A9",
+    createdAt: "2026-11-21T10:00:00.000Z",
+    ticket: { id: TICKET, serial: 4, tierName: "Standing", faceValueDrops: "2500000" },
+    event: { id: TICKET, title: "Late Show", startsAt: "2027-03-12T20:00:00.000Z", venue: "Vicar St", city: "Dublin" },
+  } as ResaleListing;
+
+  it("shows the ticket, price against face value, and the seller's offer with its ledger proof", () => {
+    render(<ResaleListingCard listing={listing} />);
+    expect(screen.getByRole("heading", { name: "Late Show" })).toBeVisible();
+    expect(screen.getByText("Standing")).toBeVisible();
+    expect(screen.getByText("3.5 XRP")).toBeVisible();
+    expect(screen.getByText(/face value 2.5 XRP/)).toBeVisible();
+    expect(screen.getByText("On sale")).toBeVisible();
+    expect(screen.getByText("rLUvY8…AuT3W")).toBeVisible();
+    expect(screen.getByText(/listed 21 Nov/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "offer on the ledger" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(new RegExp(`/transactions/${listing.createTxHash}$`)),
+    );
+    expect(screen.getByRole("link", { name: "View and buy" })).toHaveAttribute("href", `/offers/${OFFER}`);
+  });
+
+  it("leaves out the event details on the event's own page", () => {
+    render(<ResaleListingCard listing={listing} showEvent={false} />);
+    expect(screen.queryByRole("heading", { name: "Late Show" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View and buy" })).toBeVisible();
   });
 });

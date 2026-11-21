@@ -98,6 +98,21 @@ describe("ResalePolicy on Postgres", () => {
     });
   });
 
+  it("drops the listing of a ticket already used to enter the event", async () => {
+    const { event, tier } = await seed({ supply: 2 });
+    const used = await ticket(event.id, tier.id, true);
+    const fresh = await ticket(event.id, tier.id, true);
+    const usedOffer = await offer(used, { amountDrops: "3000000" });
+    const freshOffer = await offer(fresh, { amountDrops: "3000000" });
+    await db.checkInRecord.create({
+      data: { ticketId: used.id, eventId: event.id, organiserId: event.sellerId, walletAddress: SELLER_ADDR },
+    });
+
+    const p = policy();
+    expect((await p.listPublicOffers(event.id)).offers.map((o) => o.offerId)).toEqual([freshOffer.id]);
+    expect(await p.getPublicOffer(event.id, usedOffer.id)).toBeNull();
+  });
+
   it("hides every listing while a primary ticket is unsold, including direct lookup", async () => {
     const { event, tier } = await seed();
     const sold = await ticket(event.id, tier.id, true);
