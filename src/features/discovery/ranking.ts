@@ -17,6 +17,12 @@ import { EVENT_CATEGORY_LABELS, type EventCategory, type EventView } from "@/con
  * coordinate ever enters the calculation.
  */
 
+/**
+ * A followed organiser is the strongest signal (XRPL-090). Following is a
+ * deliberate choice about a specific account, so it outranks a city match and a
+ * keyword guess about the topic.
+ */
+const FOLLOWED_WEIGHT = 8;
 /** City match is weighted above a single interest: being able to attend matters more. */
 const CITY_WEIGHT = 5;
 const INTEREST_WEIGHT = 2;
@@ -51,6 +57,8 @@ export type RankingSignals = {
   interests: readonly EventCategory[];
   /** City the customer typed. Never a coordinate or a device-derived place. */
   city: string | null;
+  /** Seller ids the customer follows (XRPL-061), promoted by XRPL-090. */
+  followedSellerIds?: readonly string[];
 };
 
 export type ScoredEvent = {
@@ -75,6 +83,12 @@ function matchesCategory(event: EventView, category: EventCategory): boolean {
 export function scoreEvent(event: EventView, signals: RankingSignals): ScoredEvent {
   const reasons: string[] = [];
   let score = 0;
+
+  // Named rather than generic, so the reason is worth reading.
+  if (signals.followedSellerIds?.includes(event.seller.id)) {
+    score += FOLLOWED_WEIGHT;
+    reasons.push(`You follow ${event.seller.displayName}`);
+  }
 
   const city = signals.city ? normalise(signals.city) : null;
   if (city && normalise(event.city) === city) {
@@ -116,5 +130,9 @@ export function rankEvents(
 
 /** True when there is anything to rank by, so the UI can skip the explanation. */
 export function hasRankingSignals(signals: RankingSignals): boolean {
-  return signals.interests.length > 0 || (signals.city?.trim() ?? "") !== "";
+  return (
+    signals.interests.length > 0 ||
+    (signals.city?.trim() ?? "") !== "" ||
+    (signals.followedSellerIds?.length ?? 0) > 0
+  );
 }
