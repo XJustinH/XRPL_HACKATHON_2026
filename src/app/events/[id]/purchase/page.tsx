@@ -8,7 +8,8 @@ import { getCurrentSession } from "@/lib/auth/current-session";
 import { getPublishedEvent } from "@/features/events/event-store";
 import { eventPageReads, walletReads } from "@/features/events/server-deps";
 import { formatEventDate, formatXrp, isPastEvent } from "@/features/events/event-formatting";
-import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
+import type { TierPurchaseState } from "@/features/events/purchase-eligibility";
+import { selectTierForPurchase } from "@/features/events/purchase-selection";
 import {
   assessWalletReadiness,
   type WalletReadiness,
@@ -23,7 +24,9 @@ export const metadata = { title: "Buy a ticket" };
  *
  * Eligibility is re-checked here rather than trusted from the previous page: an
  * offer can be taken by someone else between the two requests, so arriving with
- * a stale link must say so instead of starting a purchase that would fail.
+ * a stale link must say so instead of starting a purchase that would fail. The
+ * offer shown is also confirmed against the ledger first, and one that another
+ * buyer is in the middle of buying is skipped for the next (XRPL-035).
  *
  * Wallet readiness and the fee estimate are XRPL-030; the approval and
  * acceptance themselves are XRPL-031.
@@ -41,11 +44,19 @@ export default async function PurchasePage({
   const event = await getPublishedEvent(db, id);
   if (!event) notFound();
 
-  const reads = eventPageReads();
-  const [availability, offers] = await Promise.all([
-    reads.availability(id).catch(() => null),
-    reads.primaryOffers(id).catch(() => null),
-  ]);
+  const session = await getCurrentSession();
+  const address = session?.walletAddress ?? null;
+
+  // `undefined` when availability can't be read; `null` when the event has no such ticket type.
+  const selected: TierPurchaseState | null | undefined = await selectTierForPurchase(eventPageReads(), {
+    eventId: id,
+    tierId,
+    viewerAddress: address,
+    hasStarted: isPastEvent(event.startsAt),
+  }).catch((error: unknown) => {
+    console.error("[purchase] availability unavailable", error);
+    return undefined;
+  });
 
   const backToEvent = (
     <Link
@@ -56,7 +67,7 @@ export default async function PurchasePage({
     </Link>
   );
 
-  if (availability === null || offers === null) {
+  if (selected === undefined) {
     return (
       <>
         <PageHeader title="Buy a ticket" />
@@ -68,12 +79,6 @@ export default async function PurchasePage({
       </>
     );
   }
-
-  const states = tierPurchaseStates(availability.tiers, offers, {
-    isPublished: true,
-    hasStarted: isPastEvent(event.startsAt),
-  });
-  const selected = states.find((state) => state.tierId === tierId);
 
   if (!selected) {
     return (
@@ -89,13 +94,33 @@ export default async function PurchasePage({
   }
 
   if (!selected.canBuy || !selected.offer) {
+    // Another buyer holds the last ticket on sale while they approve it in their wallet (XRPL-035).
+    const beingBought = selected.blockedReason === "BEING_BOUGHT";
     return (
       <>
         <PageHeader title="Buy a ticket" description={event.title} />
         <EmptyState
           title={selected.blockedMessage ?? "This ticket is not on sale"}
-          description="Someone may have bought the last one while you were deciding. Nothing has been charged."
-          action={backToEvent}
+          description={
+            beingBought
+              ? "Another buyer is approving the last ticket on sale in their wallet. If they don't finish, it comes back on sale within about 15 minutes. Nothing has been charged."
+              : "Someone may have bought the last one while you were deciding. Nothing has been charged."
+          }
+          action={
+            beingBought ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Link
+                  href={`/events/${id}/purchase?tier=${encodeURIComponent(selected.tierId)}`}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
+                >
+                  Check again
+                </Link>
+                {backToEvent}
+              </div>
+            ) : (
+              backToEvent
+            )
+          }
         />
       </>
     );
@@ -108,8 +133,6 @@ export default async function PurchasePage({
    * on the buyer's behalf.
    */
   const wallet = walletReads();
-  const session = await getCurrentSession();
-  const address = session?.walletAddress ?? null;
 
   const [accountInfo, reserves, feeDrops] = await Promise.all([
     address
@@ -276,8 +299,9 @@ function WalletReadinessPanel({
             Connect your wallet
           </Link>
         ) : readiness.canPurchase ? (
-          // Approval and acceptance with the buyer's wallet (XRPL-031, Agent B).
-          <BuyTicket offer={offer} buyerAddress={readiness.address} />
+          // Approval and acceptance with the buyer's wallet (XRPL-031, Agent B). Keyed by the offer, so
+          // refreshing onto another ticket starts a clean purchase (XRPL-035).
+          <BuyTicket key={offer.offerId} offer={offer} buyerAddress={readiness.address} />
         ) : (
           <button
             type="button"

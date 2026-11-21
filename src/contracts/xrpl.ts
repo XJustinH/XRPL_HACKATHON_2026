@@ -622,6 +622,11 @@ export const PrimaryOfferListing = z.object({
   ticketId: AppId,
   serial: z.number().int().positive(),
   expiresAt: IsoDateTime.nullable(),
+  /**
+   * Another buyer's purchase of it is in flight (XRPL-035): it can't be bought until that settles.
+   * Offers without one are listed first at each price.
+   */
+  purchasePending: z.boolean(),
 });
 export type PrimaryOfferListing = z.infer<typeof PrimaryOfferListing>;
 
@@ -639,6 +644,34 @@ export type EventPrimaryOffers = z.infer<typeof EventPrimaryOffers>;
 /** Body of `POST /api/offers/:id/accept-intent`. The buyer is the session's proven wallet. */
 export const AcceptOfferBody = z.object({}).strict();
 export type AcceptOfferBody = z.infer<typeof AcceptOfferBody>;
+
+/**
+ * Why `POST /api/offers/:id/accept-intent` refused with 409, in the error's `details.reason` (XRPL-035).
+ * - OFFER_CLOSED: the offer was accepted, cancelled or expired, or the ticket is already sold.
+ * - OFFER_GONE: the ledger no longer backs the offer (taken or withdrawn outside the app).
+ * - PURCHASE_IN_FLIGHT: another buyer is approving a purchase of it.
+ * - OWN_PURCHASE_IN_FLIGHT: this buyer already has a purchase of it waiting in their wallet.
+ * - OWN_OFFER: the buyer's wallet is the seller.
+ * - TICKET_USED: the ticket has been used to enter the event.
+ * - WALLET_NOT_READY: the buyer's wallet can't pay for it.
+ */
+export const PurchaseRefusalReason = z.enum([
+  "OFFER_CLOSED",
+  "OFFER_GONE",
+  "PURCHASE_IN_FLIGHT",
+  "OWN_PURCHASE_IN_FLIGHT",
+  "OWN_OFFER",
+  "TICKET_USED",
+  "WALLET_NOT_READY",
+]);
+export type PurchaseRefusalReason = z.infer<typeof PurchaseRefusalReason>;
+
+/** Refusals that mean the ticket went to, or is going to, someone else: offer the buyer another one. */
+export const TICKET_TAKEN_REASONS: readonly PurchaseRefusalReason[] = [
+  "OFFER_CLOSED",
+  "OFFER_GONE",
+  "PURCHASE_IN_FLIGHT",
+];
 
 /** Response of `POST /api/offers/:id/accept-intent`. Render `request` with the approval UI. */
 export const PurchaseRequestResult = z.object({

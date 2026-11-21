@@ -6,6 +6,9 @@ import type { OfferStatus, PrimaryOfferListing, TransactionRequest } from "@/con
 
 import { BuyTicket } from "./buy-ticket";
 
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+
 const OFFER_ID = "7be7283c-71b8-47bf-89f0-a0d8183492da";
 const TICKET = "6f1d3c2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f";
 const BUYER = "rLUvY8gJhuZ3jcBKycciciVTCRS6BAuT3W";
@@ -23,6 +26,7 @@ const OFFER: PrimaryOfferListing = {
   ticketId: TICKET,
   serial: 3,
   expiresAt: null,
+  purchasePending: false,
 };
 
 const requestId = (n: number) => `515b9d76-f7cc-4f3b-979e-${String(n).padStart(12, "0")}`;
@@ -130,6 +134,7 @@ const purchasePosts = (fetchMock: ReturnType<typeof mockApi>) =>
 describe("BuyTicket", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    refresh.mockClear();
   });
 
   it("asks a buyer without a proven wallet to connect, instead of failing a sale", () => {
@@ -188,7 +193,74 @@ describe("BuyTicket", () => {
     render(<BuyTicket offer={OFFER} buyerAddress={BUYER} pollIntervalMs={5} />);
     await userEvent.click(screen.getByRole("button", { name: "Buy for 2.5 XRP" }));
 
-    expect(await screen.findByText("This ticket was sold to someone else. Pick another one.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Someone else got this ticket first, so your purchase didn't go through. You paid only the small network fee, not the ticket price.",
+      ),
+    ).toBeVisible();
+    // Trying the same ticket again can't work: the page is asked for the next one instead.
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See what's available now" }));
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("says the ticket went elsewhere when it closed before the buyer approved (XRPL-035)", async () => {
+    mockApi({ outcome: "EXPIRED", after: () => offerStatus("ACCEPTED", "2026-11-20T22:00:00.000Z") });
+    render(<BuyTicket offer={OFFER} buyerAddress={BUYER} pollIntervalMs={5} />);
+    await userEvent.click(screen.getByRole("button", { name: "Buy for 2.5 XRP" }));
+
+    expect(
+      await screen.findByText("This ticket went to someone else before you approved. You weren't charged."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "See what's available now" })).toBeVisible();
+  });
+
+  it.each([
+    [
+      "PURCHASE_IN_FLIGHT",
+      "Someone is buying this ticket right now. Pick another one, or try again in a few minutes.",
+    ],
+    ["OFFER_GONE", "This ticket was just sold or taken off sale. Pick another one."],
+    ["OFFER_CLOSED", "This ticket is no longer for sale"],
+  ])("offers another ticket when the server refuses with %s (XRPL-035)", async (reason, message) => {
+    const fetchMock = mockApi({
+      outcome: "PENDING",
+      after: () => offerStatus("ACTIVE", null),
+      accept: () => json({ error: { code: "CONFLICT", message, details: { reason } } }, 409),
+    });
+    render(<BuyTicket offer={OFFER} buyerAddress={BUYER} />);
+    await userEvent.click(screen.getByRole("button", { name: "Buy for 2.5 XRP" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See what's available now" }));
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(purchasePosts(fetchMock)).toHaveLength(1);
+  });
+
+  it("lets the buyer try the same ticket again when the refusal is about them (XRPL-035)", async () => {
+    mockApi({
+      outcome: "PENDING",
+      after: () => offerStatus("ACTIVE", null),
+      accept: () =>
+        json(
+          {
+            error: {
+              code: "CONFLICT",
+              message:
+                "You already have a purchase of this ticket waiting in Xaman. Approve or cancel it there first.",
+              details: { reason: "OWN_PURCHASE_IN_FLIGHT" },
+            },
+          },
+          409,
+        ),
+    });
+    render(<BuyTicket offer={OFFER} buyerAddress={BUYER} />);
+    await userEvent.click(screen.getByRole("button", { name: "Buy for 2.5 XRP" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("waiting in Xaman");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "See what's available now" })).not.toBeInTheDocument();
   });
 
   it("shows the server's reason when the purchase can't start", async () => {

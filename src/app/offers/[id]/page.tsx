@@ -115,7 +115,13 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
           </Link>
         </p>
       ) : (
-        <AcceptOffer offerId={offer.id} kind={offer.kind} amountDrops={offer.amountDrops} />
+        <AcceptOffer
+          offerId={offer.id}
+          kind={offer.kind}
+          amountDrops={offer.amountDrops}
+          // A buyer who loses a resale ticket to someone else is shown the event's other listings (XRPL-035).
+          otherTicketsHref={offer.kind === "RESALE" ? `/resale?eventId=${offer.event.id}` : undefined}
+        />
       )}
     </div>
   );

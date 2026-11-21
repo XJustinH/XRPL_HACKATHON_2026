@@ -31,6 +31,7 @@ function offer(overrides: Partial<PrimaryOfferListing> = {}): PrimaryOfferListin
     ticketId: "tkt-1",
     serial: 7,
     expiresAt: null,
+    purchasePending: false,
     ...overrides,
   };
 }
@@ -95,6 +96,22 @@ describe("TicketSelection", () => {
   it("surfaces purchases in progress", () => {
     renderSelection([tier({ remaining: 5, pending: 2 })], [offer()]);
     expect(screen.getByText(/2 purchase in progress/)).toBeVisible();
+  });
+
+  it("disables buying while another buyer holds the only ticket on sale (XRPL-035)", () => {
+    renderSelection([tier({ remaining: 1, pending: 1 })], [offer({ purchasePending: true })]);
+    expect(screen.queryByRole("link", { name: "Buy ticket" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Buy ticket" })).toBeDisabled();
+    expect(screen.getByText("Being bought right now")).toBeVisible();
+  });
+
+  it("still sells a ticket nobody else is buying (XRPL-035)", () => {
+    renderSelection(
+      [tier({ remaining: 2, pending: 1 })],
+      [offer({ offerId: "held", serial: 7, purchasePending: true }), offer({ offerId: "free", serial: 8 })],
+    );
+    expect(screen.getByRole("link", { name: "Buy ticket" })).toBeVisible();
+    expect(screen.getByText(/serial #8/)).toBeVisible();
   });
 
   it("gates each tier independently", () => {

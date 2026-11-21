@@ -5,6 +5,8 @@ export class ApiError extends Error {
     message: string,
     /** False when no response arrived, so the same request may be retried with the same key. */
     readonly responded: boolean,
+    /** Why the server refused, when it said (`details.reason`, e.g. a `PurchaseRefusalReason`). */
+    readonly reason: string | null = null,
   ) {
     super(message);
   }
@@ -21,9 +23,17 @@ export async function callApi<T>(input: string, init?: RequestInit): Promise<T> 
   } catch {
     throw new ApiError("Could not reach the server. Check your connection and try again.", false);
   }
-  const body = (await response.json().catch(() => ({}))) as { data?: T; error?: { message?: string } };
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: T;
+    error?: { message?: string; details?: { reason?: unknown } | null };
+  };
   if (!response.ok || body.data === undefined) {
-    throw new ApiError(body.error?.message ?? `Request failed (HTTP ${response.status})`, true);
+    const reason = body.error?.details?.reason;
+    throw new ApiError(
+      body.error?.message ?? `Request failed (HTTP ${response.status})`,
+      true,
+      typeof reason === "string" ? reason : null,
+    );
   }
   return body.data;
 }

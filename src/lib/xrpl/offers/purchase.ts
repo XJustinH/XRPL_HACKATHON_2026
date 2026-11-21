@@ -1,6 +1,11 @@
 import { convertStringToHex } from "xrpl";
 
-import type { OfferStatus, PurchaseRequestResult, TransactionRequest } from "@/contracts/xrpl";
+import type {
+  OfferStatus,
+  PurchaseRefusalReason,
+  PurchaseRequestResult,
+  TransactionRequest,
+} from "@/contracts/xrpl";
 import type { LedgerTransaction, NFTOffer, PrismaClient } from "@/generated/prisma/client";
 import { requireProvenWallet } from "@/lib/auth/permissions";
 import type { AuthSession } from "@/lib/auth/session";
@@ -13,7 +18,7 @@ import { formatDropsAsXrp } from "../format";
 import type { XrplQueryService } from "../query";
 import { getWalletReadiness } from "../wallet/readiness";
 import { reconcileOfferCancellation } from "./cancel";
-import { isLiveOnLedger } from "./ledger-check";
+import { isLiveOnLedger, syncOfferWithLedger } from "./ledger-check";
 import { reconcileOfferCreation } from "./primary";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
 
@@ -26,6 +31,8 @@ import type { WalletTransactionRequests } from "../wallet/transaction-requests";
  *   be able to pay. A ticket has one purchase in flight at a time.
  * - A declined, expired, cancelled or failed purchase re-checks the ledger: if the offer is
  *   still there the ticket stays available, otherwise the offer is marked STALE.
+ * - When buyers compete (XRPL-035), every refusal names its reason (`PurchaseRefusalReason`), so
+ *   the one who loses is told the ticket went to someone else and is offered another.
  *
  * The same flow accepts a holder's offers (XRPL-039/040/041):
  * - a RESALE offer only while the in-app resale rule lists it publicly (`resalePolicy`, XRPL-037);
@@ -65,11 +72,16 @@ function truncate(text: string, max: number): string {
 }
 
 const STALE_MESSAGE = "This ticket was just sold or taken off sale. Pick another one.";
+const CLOSED_MESSAGE = "This ticket is no longer for sale";
+
+/** A 409 whose `details.reason` tells the buyer's screen what to offer next (XRPL-035). */
+const refuse = (reason: PurchaseRefusalReason, message: string) => errors.conflict(message, { reason });
 
 /**
  * Prepares the buyer's approval for an offer. 403 without a proven wallet · 404 unknown offer
  * or unpublished event · 409 when the ticket is no longer for sale, the buyer is the seller, the
- * ticket has been used, the buyer cannot pay, or someone is already buying it.
+ * ticket has been used, the buyer cannot pay, or someone is already buying it. Every 409 carries
+ * `details.reason` (`PurchaseRefusalReason`).
  */
 export async function requestPurchase(
   deps: PurchaseDeps,
@@ -97,11 +109,13 @@ export async function requestPurchase(
     throw errors.notFound("Offer not found");
   }
   if (offer.state !== "ACTIVE" || !offer.offerIndex || (offer.kind === "PRIMARY" && ticket.primarySoldAt)) {
-    throw errors.conflict("This ticket is no longer for sale");
+    throw refuse("OFFER_CLOSED", CLOSED_MESSAGE);
   }
-  if (buyer === offer.ownerAddress) throw errors.conflict("You can't buy a ticket from your own wallet");
+  if (buyer === offer.ownerAddress) throw refuse("OWN_OFFER", "You can't buy a ticket from your own wallet");
   // A ticket used to enter the event can't change hands, even if its offer was made before.
-  if (ticket.checkIns.length > 0) throw errors.conflict("This ticket has already been used to enter the event");
+  if (ticket.checkIns.length > 0) {
+    throw refuse("TICKET_USED", "This ticket has already been used to enter the event");
+  }
   // A resale offer can be bought here only while the in-app resale rule lists it (XRPL-037).
   if (offer.kind === "RESALE") {
     const listed = deps.resalePolicy ? await deps.resalePolicy().getPublicOffer(ticket.eventId, offer.id) : null;
@@ -113,8 +127,14 @@ export async function requestPurchase(
     requiredDrops: offer.amountDrops,
   });
   if (!readiness.canPurchase) {
-    throw errors.conflict(readiness.blockers[0] ?? "This wallet can't pay for the ticket right now");
+    throw refuse("WALLET_NOT_READY", readiness.blockers[0] ?? "This wallet can't pay for the ticket right now");
   }
+
+  // Settle earlier attempts first (XRPL-035): one that validated records its sale, so this buyer is
+  // told the ticket is sold; an expired or declined one frees the ticket.
+  await reconcileOfferPurchases(deps, offer.id);
+  const settled = await deps.db.nFTOffer.findUniqueOrThrow({ where: { id: offer.id }, select: { state: true } });
+  if (settled.state !== "ACTIVE") throw refuse("OFFER_CLOSED", CLOSED_MESSAGE);
 
   // Re-check the live offer: it may have been taken or withdrawn outside the app.
   if (!(await isLiveOnLedger(deps, offer))) {
@@ -122,27 +142,28 @@ export async function requestPurchase(
       where: { id: offer.id, state: "ACTIVE" },
       data: { state: "STALE", lastSyncedAt: new Date() },
     });
-    throw errors.conflict(STALE_MESSAGE);
+    throw refuse("OFFER_GONE", STALE_MESSAGE);
   }
-
-  // Settle earlier attempts first: an expired or declined one frees the ticket.
-  await reconcileOfferPurchases(deps, offer.id);
 
   // One purchase in flight per ticket: hold it under a lock on the offer row.
   const hold = await deps.db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "NFTOffer" WHERE "id" = ${offer.id}::uuid FOR UPDATE`;
     const current = await tx.nFTOffer.findUniqueOrThrow({ where: { id: offer.id }, select: { state: true } });
-    if (current.state !== "ACTIVE") throw errors.conflict("This ticket is no longer for sale");
+    if (current.state !== "ACTIVE") throw refuse("OFFER_CLOSED", CLOSED_MESSAGE);
     const inFlight = await tx.ledgerTransaction.findFirst({
       where: { relatedOfferId: offer.id, type: "NFTokenAcceptOffer", status: "PENDING", appliedAt: null },
       select: { account: true },
     });
     if (inFlight) {
-      throw errors.conflict(
-        inFlight.account === buyer
-          ? "You already have a purchase of this ticket waiting in Xaman. Approve or cancel it there first."
-          : "Someone is buying this ticket right now. Pick another one, or try again in a few minutes.",
-      );
+      throw inFlight.account === buyer
+        ? refuse(
+            "OWN_PURCHASE_IN_FLIGHT",
+            "You already have a purchase of this ticket waiting in Xaman. Approve or cancel it there first.",
+          )
+        : refuse(
+            "PURCHASE_IN_FLIGHT",
+            "Someone is buying this ticket right now. Pick another one, or try again in a few minutes.",
+          );
     }
     return tx.ledgerTransaction.create({
       data: {
@@ -370,6 +391,21 @@ async function ticketIdsOf(db: Pick<PrismaClient, "ticketNFT">, eventId: string)
     select: { id: true },
   });
   return tickets.map((t) => t.id);
+}
+
+/**
+ * Brings an offer up to date before it's shown to a buyer (XRPL-035). Purchases in flight are
+ * settled first: one that validated records its sale, and a dead one frees the ticket. Then the
+ * ledger is checked, so an offer taken, withdrawn or expired elsewhere is closed instead of shown
+ * (`syncOfferWithLedger`). Returns the offer's state afterwards, or null if there's no such offer.
+ */
+export async function refreshOfferForSale(
+  deps: ReconcileDeps,
+  offerId: string,
+): Promise<NFTOffer["state"] | null> {
+  await reconcileOfferPurchases(deps, offerId);
+  const offer = await deps.db.nFTOffer.findUnique({ where: { id: offerId } });
+  return offer ? syncOfferWithLedger(deps, offer) : null;
 }
 
 /**

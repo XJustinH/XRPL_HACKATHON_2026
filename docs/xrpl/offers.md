@@ -53,13 +53,18 @@ minutes on nothing more can be signed.
 `GET /api/events/:id/primary-offers` returns the event's live primary offers, **cheapest first**
 (compared as integer drops): `ACTIVE`, not expired, on minted tickets without `primarySoldAt`. Each item
 has Agent C's `OfferPort.PrimaryOffer` fields (`offerId`, `offerIndex`, `nftokenId`, `sellerAddress`,
-`amountDrops`, `tierId`) plus `tierName`, `ticketId`, `serial` and `expiresAt`. Server code can call
-`listPrimaryOffers(db, eventId)` directly. A draft event's offers are visible only to its owner (404
-otherwise). Agent A's inventory (`src/lib/inventory/primary-inventory.ts`, XRPL-020) reads the same
-`ACTIVE` primary offers for its "from" price.
+`amountDrops`, `tierId`) plus `tierName`, `ticketId`, `serial`, `expiresAt` and `purchasePending`. Server
+code can call `listPrimaryOffers(db, eventId, { viewerAddress })` directly. A draft event's offers are
+visible only to its owner (404 otherwise). Agent A's inventory (`src/lib/inventory/primary-inventory.ts`,
+XRPL-020) reads the same `ACTIVE` primary offers for its "from" price.
 
-A listed offer can still have been taken on the ledger since it was read; accepting one re-checks it
-(XRPL-031, XRPL-035).
+`purchasePending` is true while another buyer's purchase of that ticket is in flight (XRPL-035). Those
+offers are listed after the free ones at the same price, so the next buyer is given a ticket they can buy.
+The reader's own purchase in flight doesn't count (`viewerAddress`, the session's proven wallet), and
+neither does one started more than 15 minutes ago.
+
+A listed offer can still have been taken on the ledger since it was read. The purchase page confirms the
+one it shows against the ledger, and accepting one re-checks it (XRPL-031, XRPL-035).
 
 Verified on XRPL Testnet (20 Nov 2026): a dev seller wallet signed the server-built offer for a minted
 ticket at its tier price of 1 XRP,
@@ -91,13 +96,16 @@ amount and the wallet's readiness (Agent C, XRPL-030). When the wallet is ready,
    - The buyer must be able to pay: spendable XRP (balance minus reserves) covers the price plus one
      reserve increment for the NFT page the ticket may need (`getWalletReadiness`). 409 with the reason
      otherwise.
+   - **Earlier attempts are settled first.** One that validated records its sale, so this buyer is told
+     the ticket is sold. A declined or expired one frees the ticket.
    - **The live offer is re-checked on the ledger**: it must still exist with this price, owner and no
      `Destination`, and the seller must still hold the NFT. If not, the offer becomes `STALE` and the
      buyer gets 409 ("just sold or taken off sale").
    - **One purchase in flight per ticket.** A hold (a `PENDING` `NFTokenAcceptOffer` `LedgerTransaction`)
-     is taken under a lock on the offer row, and a second buyer gets 409 until it settles. Earlier
-     attempts are settled first, so a declined or expired one doesn't block anyone. Agent A's inventory
-     counts the hold as a purchase in flight (`pending`).
+     is taken under a lock on the offer row, and a second buyer gets 409 until it settles. Agent A's
+     inventory counts the hold as a purchase in flight (`pending`).
+   - Every 409 names its reason in `details.reason` (`PurchaseRefusalReason`, see
+     [Competing buyers](#competing-buyers-xrpl-035)).
    - The server builds `NFTokenAcceptOffer` (`Account` = the buyer, `NFTokenSellOffer` = the offer index,
      and a memo `xrpl-ticketing/purchase` with the offer ID) and sends it to Xaman as an
      `ACCEPT_PRIMARY_OFFER` request, which may only be an `NFTokenAcceptOffer`.
@@ -130,10 +138,62 @@ Limitations:
 
 - One ticket per purchase. Choosing a quantity is part of Agent C's ticket selection (XRPL-019).
 - A hold lasts until the buyer's Xaman request settles (it expires after 10 minutes unopened), so an
-  abandoned purchase blocks that one ticket for up to 10 minutes.
+  abandoned purchase keeps that one ticket from other buyers for up to 15 minutes. They are offered the
+  tier's other tickets meanwhile (XRPL-035).
 - A sale made straight from the ledger with another wallet app is recorded once its transaction hash is
   reconciled (`POST /api/ledger/transactions/:hash/reconcile`, XRPL-032/043). Until then the offer is marked
-  `STALE` the next time anyone tries to buy it in the app.
+  `STALE` the next time anyone opens its purchase page or tries to buy it in the app.
+
+### Competing buyers (XRPL-035)
+
+Several buyers can want the same ticket, in the app or straight on the ledger. Only one can get it. The
+others must never be shown a success, and should be pointed at a ticket they can still buy.
+
+**What is shown as available**
+
+- **Closed offers are never listed.** `EXPIRED`, `ACCEPTED`, `CANCELLED`, `STALE` and `FAILED` offers, and
+  `ACTIVE` ones past their expiry or on a sold ticket, are left out of `listPrimaryOffers`. Agent D's
+  resale listing does the same for resale offers.
+- **A ticket being bought is passed over.** While another buyer's purchase is in flight, the ticket type's
+  next free ticket is offered instead (`purchasePending`, above). If every ticket on sale is held, the
+  ticket type reads "Being bought right now" on the event page, and the purchase page says the ticket
+  comes back on sale if that buyer doesn't finish, with **Check again**.
+- **The purchase page checks the ledger before it shows a ticket** (`selectTierForPurchase`,
+  `src/features/events/purchase-selection.ts`, calling `refreshOfferForSale`):
+  - purchases in flight are settled first, so a sale that validated is recorded;
+  - an offer the ledger no longer backs is closed (`STALE`, or `EXPIRED` past its expiry) and the next one
+    is picked, for up to three offers per page view;
+  - if the ledger can't be read, the offer is shown as last recorded. Buying re-checks it.
+- Holder offers (`/offers/:id`) are checked against the ledger the same way before they are shown
+  ([Cancelling an offer](#cancelling-an-offer-xrpl-042)).
+
+**What the buyer who loses is told**
+
+| When | Server | What the buyer sees |
+|---|---|---|
+| Asking to buy a closed offer, or one whose sale has just been recorded | 409 `OFFER_CLOSED` | "This ticket is no longer for sale", and **See what's available now** |
+| Asking to buy an offer the ledger no longer has | 409 `OFFER_GONE`; the offer becomes `STALE` | "This ticket was just sold or taken off sale", and **See what's available now** |
+| Asking to buy while another buyer is approving | 409 `PURCHASE_IN_FLIGHT` | "Someone is buying this ticket right now", and **See what's available now** |
+| Approving after someone else took the ticket (`tecOBJECT_NOT_FOUND`) | the attempt is `VALIDATED_FAILURE`, the offer `STALE` | "Someone else got this ticket first, so your purchase didn't go through. You paid only the small network fee, not the ticket price", and **See what's available now** |
+| Declining or letting the request expire after the ticket went elsewhere | the attempt is `DROPPED` | "This ticket went to someone else before you approved. You weren't charged", and **See what's available now** |
+
+- **See what's available now** refreshes the purchase page, which picks the ticket type's next ticket or
+  says it has sold out. It replaces **Try again**, which could only fail the same way.
+- A refusal about the buyer rather than the ticket keeps **Try again**: `OWN_PURCHASE_IN_FLIGHT` (their
+  own purchase is waiting in Xaman), `WALLET_NOT_READY`, `OWN_OFFER` and `TICKET_USED`.
+- On a holder's offer page, a buyer who loses a resale ticket gets a link to the event's other resale
+  tickets.
+- A ticket is only ever shown as bought from the buyer's own validated `NFTokenAcceptOffer`.
+
+Limitations:
+
+- The event page lists offers from the app's records without reading the ledger. An offer taken outside
+  the app is still listed there until someone opens its purchase page.
+- A buyer whose purchase is in flight elsewhere (another tab or device) sees that ticket as available. Asking
+  again is refused with `OWN_PURCHASE_IN_FLIGHT`.
+- Purchase requests carry no `LastLedgerSequence` yet, so one opened in Xaman before it expired can still be
+  signed after its hold was released. The ledger then decides who gets the ticket, and the other buyer
+  is told as above.
 
 ## Holder offers: resale, private sale, gift (XRPL-036, 039, 040, 041)
 

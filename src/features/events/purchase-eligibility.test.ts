@@ -33,6 +33,7 @@ function offer(overrides: Partial<PrimaryOfferListing> = {}): PrimaryOfferListin
     ticketId: "tkt-1",
     serial: 1,
     expiresAt: null,
+    purchasePending: false,
     ...overrides,
   };
 }
@@ -63,6 +64,30 @@ describe("cheapestOfferForTier", () => {
       "tier-1",
     );
     expect(cheapest?.offerId).toBe("mine");
+  });
+
+  it("passes over a ticket another buyer is in the middle of buying, even a cheaper one (XRPL-035)", () => {
+    const cheapest = cheapestOfferForTier(
+      [
+        offer({ offerId: "held-cheap", amountDrops: "9000000", purchasePending: true }),
+        offer({ offerId: "held", purchasePending: true }),
+        offer({ offerId: "free-dear", amountDrops: "30000000" }),
+        offer({ offerId: "free" }),
+      ],
+      "tier-1",
+    );
+    expect(cheapest?.offerId).toBe("free");
+  });
+
+  it("falls back to the cheapest held ticket when every one is being bought", () => {
+    const cheapest = cheapestOfferForTier(
+      [
+        offer({ offerId: "held", purchasePending: true }),
+        offer({ offerId: "held-cheap", amountDrops: "9000000", purchasePending: true }),
+      ],
+      "tier-1",
+    );
+    expect(cheapest?.offerId).toBe("held-cheap");
   });
 });
 
@@ -136,6 +161,34 @@ describe("pending purchases", () => {
 
   it("is surfaced so the buyer knows stock is contested", () => {
     expect(tierPurchaseState(tier({ pending: 2 }), [offer()], OPEN).pending).toBe(2);
+  });
+
+  it("offers a ticket nobody else is buying while one is left (XRPL-035)", () => {
+    const state = tierPurchaseState(
+      tier({ remaining: 2, pending: 1 }),
+      [offer({ offerId: "held", serial: 1, purchasePending: true }), offer({ offerId: "free", serial: 2 })],
+      OPEN,
+    );
+    expect(state.canBuy).toBe(true);
+    expect(state.offer?.offerId).toBe("free");
+  });
+
+  it("blocks buying while another buyer holds every ticket on sale, and says so (XRPL-035)", () => {
+    const state = tierPurchaseState(
+      tier({ remaining: 1, pending: 1 }),
+      [offer({ purchasePending: true })],
+      OPEN,
+    );
+    expect(state.canBuy).toBe(false);
+    expect(state.blockedReason).toBe("BEING_BOUGHT");
+    expect(state.blockedMessage).toBe("Being bought right now");
+    // The held offer is still reported, so the page can show its price.
+    expect(state.offer?.offerId).toBe("off-1");
+  });
+
+  it("reports sold out ahead of a held ticket", () => {
+    const state = tierPurchaseState(tier({ sold: 100, remaining: 0 }), [offer({ purchasePending: true })], OPEN);
+    expect(state.blockedReason).toBe("SOLD_OUT");
   });
 });
 
