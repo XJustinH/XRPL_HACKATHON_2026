@@ -91,6 +91,18 @@ export interface CreatePayloadInput {
   custom_meta?: Record<string, unknown>;
 }
 
+const QuotaRefusal = z.object({
+  error: z.object({ code: z.union([z.number(), z.string()]).optional(), message: z.string().optional() }),
+});
+
+/** True when an error body says the app's quota is used up. Never throws: an unreadable body is not one. */
+async function isQuotaRefusal(response: Response): Promise<boolean> {
+  const parsed = QuotaRefusal.safeParse(await response.json().catch(() => undefined));
+  if (!parsed.success) return false;
+  const { code, message } = parsed.data.error;
+  return Number(code) === 429 || /max payloads|rate ?limit|quota/i.test(message ?? "");
+}
+
 export class XamanClient {
   constructor(
     private readonly credentials: XamanCredentials,
@@ -141,6 +153,11 @@ export class XamanClient {
     }
     if (response.status === 404) {
       throw new XrplServiceError("NOT_FOUND", "Sign request not found");
+    }
+    // Xaman reports a used-up quota as HTTP 400 with its own code 429 in the body
+    // ("Max payloads of N exceeded"), so the status alone would read as a malformed request.
+    if (response.status === 429 || (response.status === 400 && (await isQuotaRefusal(response)))) {
+      throw new XrplServiceError("PROVIDER_LIMIT_REACHED", "Xaman is refusing new requests: the app's request limit is used up");
     }
     if (response.status === 400) {
       throw new XrplServiceError("INVALID_INPUT", "Xaman rejected the sign request");

@@ -27,6 +27,14 @@ export function toLedgerAppError(error: unknown): unknown {
           retryable: true,
         },
       );
+    case "PROVIDER_LIMIT_REACHED":
+      // Logged with its cause: the fix (wait, or new Xaman credentials) is the operator's.
+      console.error(`[xrpl] ${error.code}: ${error.message}`);
+      return new AppError(
+        ErrorCode.RATE_LIMITED,
+        "The wallet service has reached its request limit for this app, so it can't send anything to Xaman right now. Wait a few minutes and try again.",
+        429,
+      );
     case "TIMEOUT":
     case "NODE_UNAVAILABLE":
     case "RPC_ERROR":
