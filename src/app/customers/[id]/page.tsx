@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
+import { NowPlayingBadge } from "@/features/integrations/spotify/now-playing-badge";
 import { getPublicCustomerProfile } from "@/features/profiles/public-customer-profile";
 
 export const metadata: Metadata = { title: "Profile" };
@@ -80,6 +81,8 @@ export default async function CustomerProfilePage({
         </section>
       ) : (
         <div className="flex flex-col gap-6">
+          {/* Renders nothing unless this viewer may see what the person is playing (XRPL-092). */}
+          <NowPlayingBadge userId={profile.userId} viewer={session} />
           <section
             aria-labelledby="interests-heading"
             className="rounded-card border border-border bg-surface-raised p-5"
