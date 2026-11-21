@@ -8,6 +8,7 @@
  *   entities.ts  — Agent A   (stored-record DTOs + enums mirroring prisma/schema.prisma)
  *   auth.ts      — Agent A   (sessions, onboarding, account, demo personas)
  *   inventory.ts — Agent A   (primary availability and sell-out state)
+ *   ownership.ts — Agent A   (ownership sync, transfer history)
  *   events.ts    — Agent C   (events, tiers, ticket/resale views, discovery, profiles)
  *   xrpl.ts      — Agent B   (ledger results, ownership, sign requests, offers)
  *   checkin.ts   — Agent D   (challenge, proof, CheckInResult, resale eligibility)
@@ -27,6 +28,7 @@ export * from "./events";
 export * from "./xrpl";
 export * from "./checkin";
 export * from "./inventory";
+export * from "./ownership";
 export * from "./commerce";
 export * from "./friends";
 export * from "./reviews";

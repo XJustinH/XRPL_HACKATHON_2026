@@ -1,7 +1,7 @@
 # src/lib/inventory — Agent A
 
-Primary inventory and sell-out state (XRPL-020). Reconciling confirmed sales (XRPL-032) and
-syncing ownership after transfers (XRPL-043) will live here too.
+Primary inventory and sell-out state (XRPL-020). Recording sales from their validated transactions
+(XRPL-032) and keeping ownership in step with the ledger (XRPL-043) live in [`src/lib/ownership`](../ownership/README.md).
 
 ## The rules
 
@@ -43,34 +43,6 @@ IDs in one call.
 
 ## Recording confirmed sales (XRPL-032)
 
-`reconcileLedgerTransaction(deps, hash)` in `sales.ts`, also exposed as
-**`POST /api/ledger/transactions/:hash/reconcile`** (signed-in callers), applies one **validated**
-transaction:
-
-- An `NFTokenAcceptOffer` that took one of the app's PRIMARY sell offers becomes a sale. The offer is
-  found by the transaction's `NFTokenSellOffer` (`acceptedSellOfferIndex` from Agent B's ledger reader).
-  The offer becomes `ACCEPTED` (`acceptTxHash`, `acceptedByAddress` = the accepting account from the
-  validated tx), and the ticket gets `primarySoldAt` (ledger close time), `primarySaleTxHash`, and its
-  cached owner once the ledger confirms that account holds the NFT. It works whether the buyer used the
-  app (Agent B's purchase flow, XRPL-031) or another wallet app.
-- **Brokered sales:** the accepting account is the broker, not the buyer. The sale is still recorded, but
-  the ticket's owner is left `STALE` for the next ownership sync rather than guessed.
-- **Exactly once.** The transaction is claimed in `LedgerTransaction` (unique `hash`, `appliedAt`). If the
-  buyer's in-app purchase attempt is still waiting for its hash, that row is used, so the in-app flow then
-  sees the sale as applied. Repeated or concurrent calls return `ALREADY_APPLIED` and change nothing.
-- Not validated yet → error `LEDGER_TX_NOT_VALIDATED` (409, retry later); nothing is recorded.
-- Other transaction types, offers the app didn't create, and resale, private or gift offers return
-  `NOT_APPLICABLE`. Ownership after those moves is XRPL-043.
-
-Remaining inventory and the sold-out state come from `primarySoldAt`, so they update as soon as a sale is
-recorded, with no separate counter to keep in step.
-
-Verified on XRPL Testnet (21 Nov 2026, `tests/testnet/primary-sale-reconcile.testnet.test.ts`). A buyer
-wallet accepted the app's sell offer straight on the ledger, bypassing the app:
-[`95D96B48…DC19A296`](https://testnet.xrpl.org/transactions/95D96B48878A26B386C7018D47B20E64D5BFAC807AC0B45EB42A1303DC19A296)
-(`tesSUCCESS`, ledger 22485392). From the hash alone:
-- the offer became `ACCEPTED`;
-- the ticket was marked sold at the ledger close time, with the buyer as its owner;
-- the event showed as sold out.
-
-Reporting the hash again, twice at once, changed nothing.
+See [`src/lib/ownership`](../ownership/README.md). A primary sale recorded there sets `primarySoldAt`, which is
+all this module counts. Remaining inventory and the sold-out state come from it, so they update as soon as a
+sale is recorded, with no separate counter to keep in step.

@@ -5,7 +5,7 @@ not just with fakes.
 
 ```bash
 npm run db:up          # Postgres, if it isn't running
-npm run test:testnet   # about a minute and a half; needs the internet
+npm run test:testnet   # about four minutes; needs the internet
 ```
 
 To run it without a local setup, use GitHub: **Actions → Testnet lifecycle → Run workflow**
@@ -24,6 +24,7 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 | List the ticket for sale at its tier price. The offer becomes `ACTIVE` only once validated, the ledger shows the same open sell offer (seller, price, no destination), and it appears in the event's public listing | Runs |
 | A buyer accepts the offer with their own wallet. Recorded as sold, with the buyer as owner, only from the validated ledger result. On the ledger the buyer holds the NFT, the seller doesn't, and the offer is gone. The ticket leaves the public listing | Runs |
 | A sale made **outside the app** (`primary-sale-reconcile.testnet.test.ts`, XRPL-032). The buyer accepts the listed offer straight on the ledger with their own wallet, and only the transaction hash reaches the app. The offer is recorded as accepted and the ticket as sold at the ledger close time, with the buyer as owner, and the event is sold out. Reporting the same hash again, even twice at once, changes nothing | Runs |
+| Ownership kept in step after moves **outside the app** (`ownership-sync.testnet.test.ts`, XRPL-043). A gift made in the app and accepted from the recipient's own wallet is recorded from its hash alone, and the giver can no longer offer the ticket. The holder then lists it in the app and hands it to another wallet outside the app. Reconciling the ticket finds the new owner and closes the old listing, and the old holder can no longer act on it. The ticket's history shows the recorded steps, each with its validated transaction, then the move outside the app | Runs |
 | The buyer sells privately to a friend, and the friend gives it back as a gift. Each offer names its recipient (`Destination`). Another wallet is refused by the app, and by the ledger itself when it tries directly. Ownership moves only from validated results | Runs |
 | The holder lists the ticket for resale, then cancels it (`NFTokenCancelOffer`, XRPL-042). The offer stays open until the cancellation validates, then is recorded `CANCELLED` with its hash. The ledger no longer shows it, and the holder still holds the ticket | Runs |
 | The holder checks in once, and a second check-in is rejected. The seller (no longer the owner) can't get a door code; an unapproved code is refused; another wallet can't approve the holder's code; the holder approves with a Xaman-style sign-in signed by their own Testnet key, which the app verifies; ownership is read from a validated ledger at the door; a repeat scan and a fresh code for the used ticket are refused; exactly one attendance record | Runs |

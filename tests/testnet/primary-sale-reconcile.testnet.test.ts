@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { getPrimaryAvailability } from "@/lib/inventory/primary-inventory";
-import { reconcileLedgerTransaction, type SalesDeps } from "@/lib/inventory/sales";
+import { reconcileLedgerTransaction, type LedgerTxDeps } from "@/lib/ownership/transfers";
 import { createXrplQueryService } from "@/lib/xrpl";
 import { reconcilePrimaryOffer, requestPrimaryOffer, type OfferDeps } from "@/lib/xrpl/offers/primary";
 import { reconcileTicketMint, requestTicketMint, type MintDeps } from "@/lib/xrpl/tickets/minting";
@@ -23,7 +23,7 @@ import { waitFor } from "./support/wait";
 const db = getDb();
 const { config, connection } = openTestnet();
 const ledger = createXrplQueryService(config);
-const sales: SalesDeps = { db, ledger: () => ledger };
+const sales: LedgerTxDeps = { db, ledger: () => ledger };
 
 let seller: TestWallet;
 let buyer: TestWallet;

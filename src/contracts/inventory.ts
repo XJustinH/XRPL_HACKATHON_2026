@@ -34,24 +34,3 @@ export type PrimaryAvailability = EventAvailability & {
   pending: number;
   tiers: TierAvailability[];
 };
-
-/**
- * POST /api/ledger/transactions/:hash/reconcile (XRPL-032). What reconciling one validated
- * transaction did. Calling it again for the same hash is safe and returns ALREADY_APPLIED.
- */
-export type LedgerReconcileResult =
-  | {
-      outcome: "APPLIED";
-      kind: "PRIMARY_SALE";
-      offerId: AppId;
-      ticketId: AppId | null;
-      /** The account that accepted the offer: the buyer, or the broker in a brokered sale. */
-      acceptedByAddress: string;
-    }
-  | { outcome: "ALREADY_APPLIED"; kind: "PRIMARY_SALE"; offerId: AppId; ticketId: AppId | null }
-  | {
-      outcome: "NOT_APPLICABLE";
-      /** NOT_AN_ACCEPT: not an NFTokenAcceptOffer. UNKNOWN_OFFER: it took no sell offer this app created.
-       *  NOT_PRIMARY: a resale, private or gift offer (XRPL-039..043). */
-      reason: "NOT_AN_ACCEPT" | "UNKNOWN_OFFER" | "NOT_PRIMARY";
-    };
