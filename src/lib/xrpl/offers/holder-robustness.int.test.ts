@@ -14,9 +14,10 @@ import { getDb } from "@/lib/db/client";
 
 import { XrplServiceError } from "../errors";
 import { nftokenIdFor } from "../tickets/__tests__/nft-ids";
+import { requestOfferCancellation } from "./cancel";
 import { requestHolderOffer, type HolderOfferDeps } from "./holder";
 import { reconcileOfferCreation, UNSIGNABLE_AFTER_MS } from "./primary";
-import { getOfferStatus, type PurchaseDeps } from "./purchase";
+import { getOfferStatus, requestPurchase, type PurchaseDeps } from "./purchase";
 
 /**
  * XRPL-036 robustness against Postgres (`npm run test:db`): settling a ticket's earlier offers before
@@ -207,7 +208,7 @@ function deps(state: LedgerState) {
       networkLabel: "XRPL Testnet",
     } as never,
   } as HolderOfferDeps & PurchaseDeps;
-  return { all, create, get, getOffers, getReserves, getValidatedTx };
+  return { all, create, get, getOffers, getReserves, getValidatedTx, getAccountInfo };
 }
 
 const resell = (all: HolderOfferDeps, userId: string, ticketId: string, amountDrops = PRICE) =>
@@ -340,6 +341,29 @@ describe("the reserve a new offer needs", () => {
     // This ticket's own open offer falls to the one-offer rule, not the reserve check.
     await expect(resell(all, fan.id, sold.id)).rejects.toThrow("already waiting for approval in Xaman");
   });
+
+  it("lets only one of two simultaneous offers for different tickets through on one offer's worth of XRP", async () => {
+    const { fan, ticket } = await seed();
+    const [first, second] = [await ticket(), await ticket()];
+    const { all, create, getAccountInfo } = deps({ request: txRequest("PENDING"), balanceDrops: "1650000" });
+    // Both requests read the same balance before either has recorded its offer.
+    const answer = await getAccountInfo(HOLDER);
+    let arrived = 0;
+    let release: () => void = () => {};
+    const bothArrived = new Promise<void>((resolve) => (release = resolve));
+    getAccountInfo.mockImplementation(async () => {
+      arrived += 1;
+      if (arrived === 2) release();
+      await bothArrived;
+      return answer;
+    });
+
+    const results = await Promise.allSettled([resell(all, fan.id, first.id), resell(all, fan.id, second.id)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const refused = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(refused?.reason).toMatchObject({ status: 409, details: { requiredDrops: "401000" } });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("check-ins and earlier holders, under the ticket's lock", () => {
@@ -413,7 +437,41 @@ describe("check-ins and earlier holders, under the ticket's lock", () => {
     expect(await stateOf(earlier.id)).toBe("STALE");
   });
 
-  it("records an offer that validates after its ticket was checked in as STALE, never ACTIVE", async () => {
+  it("leaves an earlier holder's open offer alone while its purchase is being recorded", async () => {
+    const { fan, ticket } = await seed();
+    const sold = await ticket();
+    const earlier = await db.nFTOffer.create({
+      data: {
+        ticketId: sold.id,
+        nftokenId: sold.nftokenId as string,
+        kind: "RESALE",
+        state: "ACTIVE",
+        ownerAddress: OTHER,
+        amountDrops: "9000000",
+        offerIndex: OFFER_INDEX,
+        createTxHash: TX_HASH,
+      },
+    });
+    // The fan bought it through that offer; the purchase is validated but not recorded yet.
+    await db.ledgerTransaction.create({
+      data: {
+        type: "NFTokenAcceptOffer",
+        network: "TESTNET",
+        account: HOLDER,
+        status: "PENDING",
+        signRequestRef: randomUUID(),
+        relatedTicketId: sold.id,
+        relatedOfferId: earlier.id,
+      },
+    });
+    const { all } = deps({ request: txRequest("PENDING") });
+
+    expect((await resell(all, fan.id, sold.id)).offer.state).toBe("PENDING_SIGNATURE");
+    // Not retired here: the purchase records its own outcome, and no lock on its row is waited for.
+    expect(await stateOf(earlier.id)).toBe("ACTIVE");
+  });
+
+  it("keeps an offer that validates after its ticket was checked in open on record, so it can be cancelled", async () => {
     const { fan, ticket, checkIn } = await seed();
     const sold = await ticket();
     const state: LedgerState = { request: txRequest("PENDING") };
@@ -422,11 +480,21 @@ describe("check-ins and earlier holders, under the ticket's lock", () => {
     await checkIn(sold); // admitted at the gate while the listing awaited approval
     confirmedOnLedger(state);
 
-    // Recorded through the offer's own status read, as the app's offer page does.
+    // Recorded from the ledger, through the offer's own status read: it is live there.
     expect((await getOfferStatus(all, offer.id)).offer).toMatchObject({
-      state: "STALE",
+      state: "ACTIVE",
       createTxHash: TX_HASH,
     });
+    // The used ticket still can't change hands in the app, and can't be offered again.
+    const buyer = await db.user.create({ data: { displayName: "Buyer", role: "CUSTOMER", onboardedAt: new Date() } });
+    await expect(
+      requestPurchase(all, { session: session(buyer.id, OTHER), offerId: offer.id }),
+    ).rejects.toMatchObject({ status: 409, message: "This ticket has already been used to enter the event" });
+    // The holder can withdraw it and get its reserve back.
+    state.request = txRequest("PENDING");
+    expect((await requestOfferCancellation(all, { session: session(fan.id), offerId: offer.id })).offer.id).toBe(
+      offer.id,
+    );
   });
 });
 
@@ -565,5 +633,24 @@ describe("offers whose request can't be signed or followed any more", () => {
 
     await reconcileOfferCreation(all, offer.id);
     expect(await stateOf(offer.id)).toBe("PENDING_SIGNATURE");
+  });
+  it.each([
+    ["Xaman is down", new XrplServiceError("PROVIDER_UNAVAILABLE", "Xaman is unavailable")],
+    ["the read times out", new Error("timeout")],
+  ])("keeps an old one whose request can not be read because %s", async (_why, failure) => {
+    const { fan, ticket } = await seed();
+    const sold = await ticket();
+    const offer = await awaitingApproval(sold, fan.id, longAgo());
+    const tx = await recordRequest(sold, offer.id, longAgo()); // recorded, never signed
+    const { all, get } = deps({ request: txRequest("OPENED") }); // no matching offer on the ledger
+    get.mockRejectedValue(failure);
+
+    // Only Xaman saying it no longer has the request releases an offer, never a failed read.
+    await reconcileOfferCreation(all, offer.id);
+    expect(await stateOf(offer.id)).toBe("PENDING_SIGNATURE");
+    expect(await db.ledgerTransaction.findUniqueOrThrow({ where: { id: tx.id } })).toMatchObject({
+      status: "PENDING",
+      appliedAt: null,
+    });
   });
 });

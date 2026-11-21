@@ -40,7 +40,8 @@ const MAX_INSTRUCTION_LENGTH = 280;
 const MAX_RECONCILE_PER_REQUEST = 20;
 const LIVE_STATES = ["PENDING_SIGNATURE", "ACTIVE"] as const;
 /**
- * A wallet request can't be signed once it has expired. Past this age, an offer awaiting approval
+ * Xaman stops showing a wallet request 10 minutes after it was made, though one already open in the
+ * app can still be answered. Past this age, an offer awaiting approval
  * whose request the app never recorded (e.g. a crash) or Xaman no longer knows is settled from the
  * ledger instead of holding its ticket forever.
  */
@@ -90,6 +91,10 @@ export async function requestPrimaryOffer(
   const offer = await deps.db.$transaction(async (tx) => {
     // One live primary offer per ticket: concurrent requests wait here, then see the first.
     await tx.$queryRaw`SELECT "id" FROM "TicketNFT" WHERE "id" = ${ticket.id}::uuid FOR UPDATE`;
+    // A ticket used at the door can't be sold. A check-in's insert waits on this lock, so it counts.
+    if ((await tx.checkInRecord.count({ where: { ticketId: ticket.id } })) > 0) {
+      throw errors.conflict("This ticket has already been used to enter the event");
+    }
     const live = await tx.nFTOffer.findFirst({
       where: { ticketId: ticket.id, kind: "PRIMARY", state: { in: [...LIVE_STATES] } },
       select: { state: true },
@@ -325,15 +330,13 @@ async function applyCreatedOffer(
       },
     });
     if (claimed.count === 0) return tx.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } });
-    // A ticket checked in meanwhile doesn't change hands through the app (XRPL-036).
-    const used =
-      offer.ticketId !== null && (await tx.checkInRecord.count({ where: { ticketId: offer.ticketId } })) > 0;
     await tx.nFTOffer.updateMany({
       where: { id: offer.id, state: "PENDING_SIGNATURE" },
       data: {
-        // Gone already (accepted or cancelled outside the app), or the ticket has been used:
-        // created on the ledger, but not live in this app.
-        state: onLedger && !used ? "ACTIVE" : "STALE",
+        // Gone already (accepted or cancelled outside the app): created on the ledger, but not live.
+        // An offer that is live stays ACTIVE even if its ticket was checked in meanwhile, so it can be
+        // cancelled. Buying and listing refuse used tickets themselves.
+        state: onLedger ? "ACTIVE" : "STALE",
         offerIndex: confirmed.offerIndex,
         createTxHash: confirmed.hash,
         lastSyncedAt: now,
@@ -411,7 +414,8 @@ export async function listPrimaryOffers(
       state: "ACTIVE",
       offerIndex: { not: null },
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-      ticket: { eventId, mintStatus: "MINTED", primarySoldAt: null },
+      // A ticket already used to enter the event isn't for sale, whatever its offer says.
+      ticket: { eventId, mintStatus: "MINTED", primarySoldAt: null, checkIns: { none: {} } },
     },
     include: { ticket: { select: { id: true, serial: true, tier: { select: { id: true, name: true } } } } },
   });
