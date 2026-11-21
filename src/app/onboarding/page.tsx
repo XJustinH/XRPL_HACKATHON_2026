@@ -34,6 +34,8 @@ export default async function OnboardingPage() {
       </h2>
       <p className="mt-1 mb-4 max-w-2xl text-sm text-muted">
         Sample accounts for trying the platform. They&apos;re labelled as demo content and hold no real value.
+        Choose an account first, then connect a wallet: a wallet stays linked to the first account that
+        connects it, so use a different wallet for each account.
       </p>
       <DemoPersonaList personas={personas} currentUserId={session?.userId ?? null} />
     </section>

@@ -229,7 +229,8 @@ describe("WalletConnectPanel", () => {
             {
               error: {
                 code: "WALLET_LINKED_TO_OTHER_ACCOUNT",
-                message: "This wallet is linked to another account. Sign out, then sign in with the wallet.",
+                message:
+                  "This wallet is linked to another account, so it can't be added to this one. Pick a different account in Xaman and try again, or sign out and connect to use the wallet's own account.",
               },
               requestId: "r",
             },

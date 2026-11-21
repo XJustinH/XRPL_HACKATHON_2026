@@ -129,7 +129,7 @@ export async function completeWalletSignIn(
       if (ownerId && ownerId !== current.userId) {
         throw new AppError(
           AuthErrorCode.WALLET_LINKED_TO_OTHER_ACCOUNT,
-          "This wallet is linked to another account. Sign out, then sign in with the wallet.",
+          "This wallet is linked to another account, so it can't be added to this one. Pick a different account in Xaman and try again, or sign out and connect to use the wallet's own account.",
           409,
         );
       }
