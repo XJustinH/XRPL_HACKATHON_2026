@@ -286,6 +286,25 @@ describe("reconcileTicketMint", () => {
     expect((await db.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } })).mintStatus).toBe("PENDING");
   });
 
+  it("never records a mint that a different wallet signed, and frees the ticket for a retry", async () => {
+    const OTHER = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
+    const state: Parameters<typeof deps>[0] = { request: txRequest("PENDING") };
+    const { mintDeps, ticket, event, tier, getValidatedTx } = await mintRequested(state);
+    // Xaman no longer restricts the signer here: the validated mint is another account's.
+    state.nftokenId = nftokenIdFor(OTHER, ticketTaxon(event.id));
+    state.uri = ticket.metadataUri;
+    state.request = txRequest("CONFIRMED", { txHash: TX_HASH });
+    const confirmed = await getValidatedTx();
+    getValidatedTx.mockResolvedValue({ ...confirmed, account: OTHER, nftokenId: state.nftokenId });
+
+    expect(await reconcileTicketMint(mintDeps, ticket.id)).toMatchObject({
+      mintStatus: "FAILED",
+      nftokenId: null,
+      issuerAddress: ISSUER,
+    });
+    expect((await db.ticketTier.findUniqueOrThrow({ where: { id: tier.id } })).mintedQuantity).toBe(0);
+  });
+
   it.each([
     ["REJECTED", {}, "DROPPED"],
     ["EXPIRED", {}, "DROPPED"],

@@ -443,6 +443,17 @@ async function applyConfirmedMint(
     throw new Error(`Transaction ${confirmed.hash} is not a mint with an NFTokenID`);
   }
   const issuer = confirmed.account;
+  // The ticket was reserved for one wallet. A mint another account signed put the NFT where the
+  // seller cannot list it, so it is never recorded as this ticket: the ticket is freed for a retry.
+  const expected = pending.account ?? ticket.issuerAddress;
+  if (expected && issuer !== expected) {
+    return applyFailedMint(deps, ticket, pending, {
+      txHash: confirmed.hash,
+      failureReason: "WRONG_WALLET",
+      engineResult: confirmed.result,
+      ledgerIndex: confirmed.ledgerIndex,
+    });
+  }
   const parsed = parseNFTokenID(confirmed.nftokenId);
   if (parsed.Issuer !== issuer || parsed.Taxon !== ticketTaxon(ticket.eventId)) {
     throw new Error(`NFT ${confirmed.nftokenId} does not match ticket ${ticket.id}`);
