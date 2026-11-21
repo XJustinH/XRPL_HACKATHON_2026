@@ -1,19 +1,19 @@
 /**
  * Server wiring for friendships (XRPL-084). Server-only.
- * Users and privacy preferences use the existing User table. Friendship storage waits on Agent A's
- * FriendConnection / UserBlock tables (schema request in the XRPL-084 PR): until then every
- * friendship read and write answers 503 rather than pretending.
+ * Users and privacy preferences use the User table, and friendships Agent A's FriendConnection and
+ * UserBlock tables (`PrismaFriendStore`).
  */
 import { getDb } from "@/lib/db/client";
 import { errors } from "@/lib/http/response";
 import { FriendService, type FriendStore } from "./friend-service";
+import { PrismaFriendStore } from "./prisma-store";
 import { PrismaUserDirectory } from "./user-directory";
 
 const pending = async (): Promise<never> => {
   throw errors.unavailable("Friends aren't available yet.");
 };
 
-/** Placeholder until the friendship tables land; swap for a Prisma store then. */
+/** Answers 503 for everything. Kept to switch friendships off quickly if ever needed. */
 export const unavailableFriendStore: FriendStore = {
   findPair: pending,
   findById: pending,
@@ -30,7 +30,8 @@ export const unavailableFriendStore: FriendStore = {
 const g = globalThis as unknown as { __friendService?: FriendService | null };
 
 export function getFriendService(): FriendService {
-  g.__friendService ??= new FriendService({ store: unavailableFriendStore, users: new PrismaUserDirectory(getDb()) });
+  const db = getDb();
+  g.__friendService ??= new FriendService({ store: new PrismaFriendStore(db), users: new PrismaUserDirectory(db) });
   return g.__friendService;
 }
 
