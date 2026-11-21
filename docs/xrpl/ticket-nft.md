@@ -87,12 +87,15 @@ tier setup), signing each `NFTokenMint` in their own Xaman wallet. The app never
 1. **Request.** `POST /api/events/:id/mints` with `{ tierId }` and an `Idempotency-Key` header. Only the
    event's owner may mint (Agent A's `requireEventOwner`: 401 / 404 / 403 `NOT_EVENT_OWNER`), and only
    with the wallet this session has proven through Xaman sign-in (XRPL-012, `requireProvenWallet`: 403
-   `WALLET_NOT_VERIFIED`). That proven wallet is the issuer; the browser never names it. The server
-   reserves the next ticket (`PENDING`, metadata URI fixed; 409 when the tier is full) and builds the
-   transaction itself: `Account` = the proven wallet, the event's taxon, `tfTransferable`, the ticket's
-   URI and a memo (`xrpl-ticketing/ticket`) carrying the ticket ID. It is sent to Xaman as a `MINT_TICKET`
-   request, which may only be an `NFTokenMint`. A `PENDING` `LedgerTransaction` links the ticket to the
-   request. Response: the ticket, the request (QR code and link) and `metadataPublic`.
+   `WALLET_NOT_VERIFIED`). That proven wallet is the issuer; the browser never names it. The server first
+   settles the tier's mints in flight and checks the wallet can pay for the mint (XRPL-027, below). It
+   then reserves the next ticket (`PENDING`, metadata URI fixed; 409 when the tier is full) and records
+   the attempt in the same database transaction: a `PENDING` `LedgerTransaction`, later linked to the
+   request. It builds the transaction itself: `Account` = the proven wallet, the event's taxon,
+   `tfTransferable`, the ticket's URI, a memo (`xrpl-ticketing/ticket`) carrying the ticket ID, and a
+   `LastLedgerSequence` 300 ledgers past the validated ledger. It is sent to Xaman as a `MINT_TICKET`
+   request, which may only be an `NFTokenMint`. Response: the ticket, the request (QR code and link) and
+   `metadataPublic`.
 2. **Approve.** The seller checks and approves in Xaman. `TransactionApproval` follows the request:
    submitted, then confirmed with an explorer link.
 3. **Reconcile.** `GET /api/events/:id/mints` brings every mint in flight up to date (up to 20 per call)
@@ -106,7 +109,12 @@ How a mint is recorded (`reconcileTicketMint`):
 | Validated `tesSUCCESS` `NFTokenMint` (re-checked with `getValidatedTx`) | `MINTED` with `nftokenId`, `mintTxHash`, `mintedAt` (ledger close time), issuer = the transaction's `Account` | `VALIDATED_SUCCESS`, `appliedAt` set | +1, once |
 | Signed and submitted, not yet validated | `SUBMITTED` | hash recorded | unchanged |
 | Rejected by the ledger (`tec…`, fee charged) | `FAILED` | `VALIDATED_FAILURE` | unchanged |
-| Declined, expired, cancelled, or never validated | `FAILED` | `DROPPED` | unchanged |
+| Declined (before or after Xaman's expiry), cancelled, expired unopened, or never validated | `FAILED` | `DROPPED` | unchanged |
+| Opened in Xaman before it expired, not answered yet | unchanged until its `LastLedgerSequence` passes, then as expired | unchanged | unchanged |
+| Xaman couldn't create the request | `FAILED` at once | `DROPPED` | unchanged |
+| Never recorded: the server stopped before recording the request, or couldn't free the ticket after a failed create | `FAILED` once its `LastLedgerSequence` passes | `DROPPED` | unchanged |
+| Xaman no longer has the request, past its `LastLedgerSequence`, and it was signed (hash recorded) | from its transaction: as the rows above. If the node doesn't know the transaction, as the next row | as above | as above |
+| The same, unsigned as far as the app knows | the issuer's history is searched for the ticket's mint: recorded as `MINTED` if found, `FAILED` if the search rules one out, otherwise unchanged | as above | +1 if found |
 | Xaman unreachable | unchanged; retried on the next read | unchanged | unchanged |
 
 - **No false mints.** A ticket becomes `MINTED` only from the validated transaction, and only if the
@@ -116,8 +124,8 @@ How a mint is recorded (`reconcileTicketMint`):
 - **Exactly once.** Effects are applied in one database transaction that first claims the
   `LedgerTransaction` (`appliedAt`). Repeated or concurrent reconciles never count a mint twice, and a
   late answer never moves a ticket back to an earlier status.
-- **Failed mints are reusable.** A `FAILED` ticket never got an NFT, so the next mint in that tier reuses
-  its serial and URI.
+- **Failed mints are reusable.** A `FAILED` ticket never got an NFT, and nothing signed for its last
+  attempt can validate any more, so the next mint in that tier reuses its serial and URI (XRPL-027).
 - **Idempotency.** A repeated `Idempotency-Key` replays the first response (`Idempotent-Replayed: true`)
   instead of reserving another ticket. The same key with a different body gets 422
   `IDEMPOTENCY_KEY_REUSED`, and 409 while the first request is still running. Keys last 24 hours and
@@ -134,9 +142,10 @@ recorded by the reconciler from the validated ledger:
 Limitations:
 
 - One ticket per approval: the seller signs each NFTokenMint. A tier's whole quantity is minted as a run
-  of approvals (XRPL-025, below). Retrying failed mints is XRPL-027.
-- An unapproved request holds its serial until the Xaman request expires (10 minutes). The next read
-  then releases it.
+  of approvals (XRPL-025, below). Failures and retries: XRPL-027, below.
+- An unapproved request holds its serial until Xaman reports it expired (10 minutes unopened). One opened
+  in Xaman holds it until its `LastLedgerSequence` passes, since it can still be signed until then. The
+  next read, or the next mint in the tier, then releases it.
 - A demo persona must prove its wallet again in each session (Agent A's rule for shared demo accounts).
 - Locally the metadata URI is `localhost`, so Xaman and the explorer cannot show the ticket's details
   (the panel warns when `metadataPublic` is false). The mint itself is valid.
@@ -172,6 +181,108 @@ Limitations:
   (Xaman user tokens) is a possible follow-up.
 - A run lives in the open page. Leaving the page stops it after the current request; the tickets and
   their statuses are kept, and **Mint all N remaining** picks up where it left off.
+
+## Failures and retries (XRPL-027)
+
+A mint can fail before, during or after its approval. Each failure says what happened, a retry never
+gives a ticket a second NFT, and the tier's counts stay right. Code: `src/lib/xrpl/tickets/minting.ts`,
+`store.ts`, and `findTicketMint` / `recordTicketMint` in `mapping.ts`.
+
+**Distinguishable errors.** Where the seller sees each one:
+
+| When | Cause | What the seller sees |
+|---|---|---|
+| Before anything is reserved (`POST /api/events/:id/mints`) | The wallet isn't activated on the ledger | 409 (`details.reason: "ACCOUNT_NOT_FOUND"`): fund it with at least the base reserve |
+| | The wallet can't keep one owner-reserve increment (0.2 XRP on Testnet) plus the fee spare | 409 (`details.reason: "INSUFFICIENT_RESERVE"`, `requiredDrops`, `spendableDrops`): how much is spare |
+| | The ledger node has no validated ledger | 503 |
+| When the approval ends (the run's stop message) | Declined, cancelled or expired in Xaman | Which of the three |
+| | Rejected by the ledger with `tecINSUFFICIENT_RESERVE` | That the wallet doesn't hold enough XRP for the reserve, and to add XRP first |
+| | Rejected by the ledger with another `tec…` result | The result code, and that the fee was charged |
+| | Refused by the network (`tem…`/`tef…`), not validated in time, or signed on another network | Which one, in words, and that nothing was charged |
+| Right after, on each failed ticket's row (the panel reloads `GET /api/events/:id/mints` as the run stops) | Its latest attempt (`mintFailure`) | `NOT_APPROVED`, `REQUEST_FAILED`, `INSUFFICIENT_RESERVE` or `LEDGER_REJECTED` (with the failed transaction's link and that the fee was charged), or `NOT_VALIDATED` |
+
+The reserve check assumes the mint needs a new NFT page. Each page holds one increment of the issuer's
+XRP, and which page a new NFT lands on depends on its position among the wallet's NFTs. Without the
+check, the ledger would reject the mint with `tecINSUFFICIENT_RESERVE` and still charge the fee.
+
+**A retry never mints a ticket twice.**
+
+- **Retry reuses the failed ticket.** The panel's single-mint button reads **Retry #n** while a tier has
+  failed tickets. The server reuses the lowest-numbered one, with its serial and metadata URI. A `MINTED`
+  ticket is never reserved again, and a ticket's NFT mapping is never overwritten.
+- **Only once nothing can validate.** A ticket becomes `FAILED`, and so reusable, only when nothing signed
+  for its last attempt can validate any more:
+  - Every mint carries a `LastLedgerSequence` 300 ledgers past the validated ledger (`MINT_LEDGER_WINDOW`,
+    about 15 to 20 minutes). Xaman's documentation says a ledger index in that field "will be passed on
+    unchanged" ([payload lifecycle](https://docs.xaman.dev/concepts/payloads-sign-requests/lifecycle)), so
+    the ledger refuses anything signed later.
+  - Xaman's 10-minute expiry only limits opening a request, and a request opened in time can still be
+    answered. So one opened in time and not answered stays `OPENED`, holding its ticket, until that
+    ledger passes. The approval card shows no expiry time for it then. Declining it frees the ticket at
+    once.
+  - A network refusal (`tem…`/`tef…`) only counts while the node has never seen the transaction.
+- **Settled first.** Before reserving, the tier's mints in flight are brought up to date. A mint
+  confirmed meanwhile is recorded instead of its ticket being reserved again. A declined or expired one
+  frees its ticket for this very request.
+- **Lost requests.** A request Xaman no longer has is settled from the ledger once its
+  `LastLedgerSequence` has passed:
+  - If it was signed and the node knows its transaction, from that transaction.
+  - Otherwise the issuer's history is searched, newest first, for a mint carrying the ticket's memo: up
+    to its 1,200 most recent transactions, stopping at the first one from before the request. A mint
+    found there is recorded once, with the ledger check's checks. A mint that doesn't match the ticket
+    leaves it as it is, for the ledger check to report.
+  - The ticket is freed only when the search rules a mint out: it read back past the request, or the
+    account has nothing older and the node's history starts at least 1,000 ledgers before the request's
+    `LastLedgerSequence`. A node that keeps less history can't show an older mint, so its empty answer
+    proves nothing and the ticket stays as it is.
+- **Idempotency.** A repeated `Idempotency-Key` still replays the first response.
+
+**Inventory stays consistent after a partial failure.**
+
+- Every attempt is recorded in the same database transaction that reserves its ticket. So no reservation
+  is left without a record that a reconcile can settle, even if the server stops before the request
+  exists or is recorded.
+- A tier's `mintedQuantity` goes up once per validated mint, from the request or from the ledger.
+- `FAILED` tickets count as left to mint. `PENDING` and `SUBMITTED` ones count against the supply only
+  until they are settled, so a tier is never left full of requests nobody can sign.
+- A run that stops at a failure keeps its minted tickets. Starting it again retries the failed ticket
+  first, then continues towards the configured quantity.
+
+Verified on XRPL Testnet (21 Nov 2026). A script standing in for Xaman signed the server-built mints
+with a fresh wallet, funded with the base reserve plus 0.1 XRP, and submitted them with xrpl.js:
+
+1. The reserve check refused the mint with 409 ("this wallet has 0.1 XRP spare"), and nothing was reserved.
+2. The check was then bypassed for one request, as if the wallet's XRP had moved between the check and
+   the signature. The ledger rejected that mint:
+   [`5222366A…0A5117DB`](https://testnet.xrpl.org/transactions/5222366AACDE8A61F38B1DD894EC154ADB93A57FF53F0B3B324B20550A5117DB)
+   (`tecINSUFFICIENT_RESERVE`, ledger 22488158). It was recorded `FAILED`, reason `INSUFFICIENT_RESERVE`.
+3. After a 0.5 XRP top-up, the retry reused the same ticket (ID, serial and URI) and minted it:
+   [`A4293205…15BA0F0D`](https://testnet.xrpl.org/transactions/A4293205335EF398A91EA36A1507ED467A49519E969BEF63195ABA2015BA0F0D)
+   (`tesSUCCESS`, ledger 22488162).
+   - The tier went to 1 of 1, and the wallet held one NFT.
+   - Another mint got 409.
+   - The ledger check verified the mint.
+4. The server-built `LastLedgerSequence` (300 past the validated ledger at the time) reached the ledger
+   unchanged in both validated mints. That Xaman itself leaves it unchanged rests on its documentation,
+   and is worth confirming once with a real Xaman approval during the demo rehearsal.
+
+Limitations:
+
+- A wallet with less than 0.2 XRP spare is refused even when the NFT would fit on an existing page. It
+  couldn't list the ticket for sale either: each sell offer holds 0.2 XRP.
+- After a reload, a request declined, cancelled or expired in Xaman shows as "Not approved in Xaman". The
+  app keeps the ledger's outcome, not Xaman's answer. The run's stop message says which at the time.
+- A request opened in Xaman and left unanswered holds its ticket until its `LastLedgerSequence` passes.
+  The seller can end the wait by declining it in Xaman.
+- Attempts recorded before XRPL-027 have no `LastLedgerSequence`, so the app's 15-minute rule applies to
+  them instead. One that Xaman lost is freed only when the history search reads back past it.
+- A lost request's ticket stays pending, and this is logged, when the search can't rule a mint out:
+  more than 1,200 of the issuer's transactions are newer than the request, or the node keeps too little
+  history (the public Testnet fallback node keeps about two hours). Nothing in the app frees it then.
+  The seller's **Check against the ledger** still records a mint that did happen.
+- Offer and purchase requests don't carry a `LastLedgerSequence` yet. An offer request opened before it
+  expired can still be signed after the app has recorded it as failed. That is a follow-up for the offer
+  code.
 
 ## Mapping NFTs to tickets (XRPL-026)
 
@@ -210,4 +321,5 @@ Limitations:
   (`complete: false`). Older mints are still verified one by one through `getValidatedTx`.
 - History is limited to what the node keeps (the public Testnet node answered with about a year of
   ledgers). A Clio node keeps everything.
-- It runs when the seller asks. A scheduled run is a follow-up (XRPL-027).
+- It runs when the seller asks. A request Xaman lost has its ticket's mint looked for in the issuer's
+  recent history automatically (XRPL-027). A scheduled full check is a follow-up.

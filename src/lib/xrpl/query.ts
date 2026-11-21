@@ -317,7 +317,8 @@ export class XrplQueryService {
   /**
    * NFTs minted by (issued by) `address`, newest first, from validated ledgers only
    * (rippled account_tx). Used to rebuild and verify ticket mappings from the ledger
-   * (XRPL-026). Covers only the history the node keeps.
+   * (XRPL-026). Covers only the history the node keeps: `earliestLedger` says where that
+   * starts, and `oldestScanned` how far back this page reached, mints or not (XRPL-027).
    */
   async getAccountMints(
     address: string,
@@ -341,16 +342,24 @@ export class XrplQueryService {
     const result = response.result as unknown as {
       transactions: AccountTxEntry[];
       marker?: unknown;
+      ledger_index_min?: number;
       ledger_index_max?: number;
       validated?: boolean;
     };
     const items = result.transactions
       .map((entry) => this.toLedgerMint(entry))
       .filter((mint): mint is LedgerMint => mint !== null && mint.issuer === account);
+    // Newest first, so the last entry is the oldest one read, whatever its type.
+    const oldest = result.transactions.at(-1);
     return {
       address: account,
       items,
       scanned: result.transactions.length,
+      earliestLedger: typeof result.ledger_index_min === "number" ? result.ledger_index_min : null,
+      oldestScanned:
+        oldest && typeof oldest.ledger_index === "number"
+          ? { ledgerIndex: oldest.ledger_index, closeTime: oldest.close_time_iso ?? null }
+          : null,
       nextCursor:
         result.marker === undefined || result.marker === null
           ? null

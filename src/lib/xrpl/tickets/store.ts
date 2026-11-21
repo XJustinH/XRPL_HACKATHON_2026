@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@/generated/prisma/client";
+import type { XrplNetwork } from "@/contracts/entities";
+import type { LedgerTransaction, Prisma, PrismaClient, TicketNFT } from "@/generated/prisma/client";
 import { errors } from "@/lib/http/response";
 
 import { ticketMetadataUrl } from "./urls";
@@ -31,52 +32,82 @@ export interface CreatePendingTicketInput {
  * the tier's supply (XRPL-025). The (tierId, serial) unique index is a second guard.
  */
 export async function createPendingTicket(db: PrismaClient, input: CreatePendingTicketInput) {
+  return db.$transaction((tx) => reserveTicket(tx, input));
+}
+
+/**
+ * Reserves the next ticket of a tier, as `createPendingTicket` does, and records the mint attempt in the
+ * same transaction (XRPL-027): a `PENDING` `NFTokenMint` `LedgerTransaction` for the issuer, before any
+ * sign request exists. Every attempt then has a record, even one whose request is never created or
+ * recorded, so a reconcile can always settle it and free the ticket.
+ *
+ * While the attempt is pending, its `ledgerIndex` holds the mint's `LastLedgerSequence`: the last
+ * ledger it can be validated in. Settling the attempt replaces it with the ledger it was validated in,
+ * or clears it.
+ */
+export async function reserveTicketMint(
+  db: PrismaClient,
+  input: CreatePendingTicketInput & { network: XrplNetwork; lastLedgerSequence: number },
+): Promise<{ ticket: TicketNFT; attempt: LedgerTransaction }> {
   return db.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<Array<{ id: string; totalSupply: number }>>`
-      SELECT "id", "totalSupply" FROM "TicketTier"
-      WHERE "id" = ${input.tierId}::uuid AND "eventId" = ${input.eventId}::uuid
-      FOR UPDATE`;
-    const tier = locked[0];
-    if (!tier) throw errors.notFound("Ticket tier not found for this event");
-
-    const failed = await tx.ticketNFT.findFirst({
-      where: { tierId: tier.id, mintStatus: "FAILED", nftokenId: null },
-      orderBy: { serial: "asc" },
-      select: { id: true },
-    });
-    if (failed) {
-      return tx.ticketNFT.update({
-        where: { id: failed.id },
-        data: {
-          mintStatus: "PENDING",
-          issuerAddress: input.issuerAddress,
-          metadataUri: ticketMetadataUrl(input.baseUrl, failed.id),
-          mintTxHash: null,
-          mintedAt: null,
-        },
-      });
-    }
-
-    const allocated = await tx.ticketNFT.count({ where: { tierId: tier.id, mintStatus: { not: "FAILED" } } });
-    if (allocated >= tier.totalSupply) {
-      throw errors.conflict(
-        `All ${tier.totalSupply} tickets in this tier are already minted or being minted`,
-      );
-    }
-
-    const { _max } = await tx.ticketNFT.aggregate({ where: { tierId: tier.id }, _max: { serial: true } });
-    const id = randomUUID();
-    return tx.ticketNFT.create({
+    const ticket = await reserveTicket(tx, input);
+    const attempt = await tx.ledgerTransaction.create({
       data: {
-        id,
-        eventId: input.eventId,
-        tierId: tier.id,
-        serial: (_max.serial ?? 0) + 1,
-        issuerAddress: input.issuerAddress,
-        metadataUri: ticketMetadataUrl(input.baseUrl, id),
-        mintStatus: "PENDING",
+        type: "NFTokenMint",
+        network: input.network,
+        account: input.issuerAddress,
+        status: "PENDING",
+        ledgerIndex: input.lastLedgerSequence,
+        relatedTicketId: ticket.id,
       },
     });
+    return { ticket, attempt };
+  });
+}
+
+async function reserveTicket(tx: Prisma.TransactionClient, input: CreatePendingTicketInput) {
+  const locked = await tx.$queryRaw<Array<{ id: string; totalSupply: number }>>`
+    SELECT "id", "totalSupply" FROM "TicketTier"
+    WHERE "id" = ${input.tierId}::uuid AND "eventId" = ${input.eventId}::uuid
+    FOR UPDATE`;
+  const tier = locked[0];
+  if (!tier) throw errors.notFound("Ticket tier not found for this event");
+
+  const failed = await tx.ticketNFT.findFirst({
+    where: { tierId: tier.id, mintStatus: "FAILED", nftokenId: null },
+    orderBy: { serial: "asc" },
+    select: { id: true },
+  });
+  if (failed) {
+    return tx.ticketNFT.update({
+      where: { id: failed.id },
+      data: {
+        mintStatus: "PENDING",
+        issuerAddress: input.issuerAddress,
+        metadataUri: ticketMetadataUrl(input.baseUrl, failed.id),
+        mintTxHash: null,
+        mintedAt: null,
+      },
+    });
+  }
+
+  const allocated = await tx.ticketNFT.count({ where: { tierId: tier.id, mintStatus: { not: "FAILED" } } });
+  if (allocated >= tier.totalSupply) {
+    throw errors.conflict(`All ${tier.totalSupply} tickets in this tier are already minted or being minted`);
+  }
+
+  const { _max } = await tx.ticketNFT.aggregate({ where: { tierId: tier.id }, _max: { serial: true } });
+  const id = randomUUID();
+  return tx.ticketNFT.create({
+    data: {
+      id,
+      eventId: input.eventId,
+      tierId: tier.id,
+      serial: (_max.serial ?? 0) + 1,
+      issuerAddress: input.issuerAddress,
+      metadataUri: ticketMetadataUrl(input.baseUrl, id),
+      mintStatus: "PENDING",
+    },
   });
 }
 

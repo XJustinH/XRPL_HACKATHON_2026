@@ -128,6 +128,22 @@ describe("TransactionApproval", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("says when the ledger rejected a transaction for want of reserve (XRPL-027)", async () => {
+    mockApi([
+      txRequest("FAILED", {
+        txHash: TX_HASH,
+        failureReason: "LEDGER_REJECTED",
+        engineResult: "tecINSUFFICIENT_RESERVE",
+        explorerUrl: EXPLORER,
+      }),
+    ]);
+    render(<TransactionApproval request={txRequest("SUBMITTED")} pollIntervalMs={5} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "your wallet doesn't hold enough XRP for the reserve it needs (tecINSUFFICIENT_RESERVE). Add XRP to the wallet and try again. The small network fee was charged",
+    );
+  });
+
   it.each([
     ["REJECTED", {}, "You declined the request in Xaman. Nothing was sent."],
     ["EXPIRED", {}, "The request expired before it was approved. Nothing was sent."],

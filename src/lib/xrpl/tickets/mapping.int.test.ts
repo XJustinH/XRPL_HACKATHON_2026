@@ -95,6 +95,8 @@ function fakeLedger(
     address,
     items: history.filter((mint) => mint.issuer === address),
     scanned: history.length,
+    earliestLedger: 1,
+    oldestScanned: null,
     nextCursor: null,
     provenance: {
       endpoint: "wss://node",
@@ -378,6 +380,8 @@ describe("reconcileEventMappings: access and limits", () => {
       address,
       items: [],
       scanned: 400,
+      earliestLedger: 1,
+      oldestScanned: null,
       nextCursor: "MORE",
       provenance: {
         endpoint: "wss://node",
