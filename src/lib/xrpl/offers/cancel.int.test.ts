@@ -187,10 +187,20 @@ function deps(world: World) {
     provenance,
   }));
   const getOffers = vi.fn(async (nftokenId: string) => ({ nftokenId, sellOffers: world.sellOffers, buyOffers: [], provenance }));
+  // Making a holder offer checks the wallet can cover the offer's reserve (XRPL-036).
+  const getAccountInfo = vi.fn(async (address: string) => ({
+    address,
+    exists: true,
+    balanceDrops: "100000000",
+    sequence: 1,
+    ownerCount: 0,
+    provenance,
+  }));
+  const getReserves = vi.fn(async () => ({ baseDrops: "1000000", incrementDrops: "200000" }));
   const all = {
     db,
     transactions: () => ({ create, get }) as never,
-    ledger: () => ({ getValidatedTx, verifyOwner, getOffers }) as never,
+    ledger: () => ({ getValidatedTx, verifyOwner, getOffers, getAccountInfo, getReserves }) as never,
     config: { network: "TESTNET", explorerUrl: "https://testnet.xrpl.org", networkLabel: "XRPL Testnet" } as never,
   } satisfies OfferDeps;
   return { all, create };

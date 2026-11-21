@@ -9,9 +9,13 @@ import { toNFTOfferDto } from "@/lib/db/mappers";
 import { errors } from "@/lib/http/response";
 
 import type { XrplConfig } from "../config";
+import { isXrplServiceError } from "../errors";
 import { formatDropsAsXrp } from "../format";
 import type { XrplQueryService } from "../query";
-import type { WalletTransactionRequests } from "../wallet/transaction-requests";
+import {
+  TRANSACTION_REQUEST_EXPIRY_MINUTES,
+  type WalletTransactionRequests,
+} from "../wallet/transaction-requests";
 
 /**
  * Primary sale offers (XRPL-029). The event's owner lists a minted ticket for sale at its
@@ -35,6 +39,13 @@ export const OFFER_MEMO_TYPE = "xrpl-ticketing/offer";
 const MAX_INSTRUCTION_LENGTH = 280;
 const MAX_RECONCILE_PER_REQUEST = 20;
 const LIVE_STATES = ["PENDING_SIGNATURE", "ACTIVE"] as const;
+/**
+ * A wallet request can't be signed once it has expired. Past this age, an offer awaiting approval
+ * whose request the app never recorded (e.g. a crash) or Xaman no longer knows is settled from the
+ * ledger instead of holding its ticket forever.
+ */
+export const UNSIGNABLE_AFTER_MS = (TRANSACTION_REQUEST_EXPIRY_MINUTES + 5) * 60 * 1000;
+const unsignable = (since: Date) => Date.now() - since.getTime() > UNSIGNABLE_AFTER_MS;
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -161,12 +172,25 @@ export async function reconcilePrimaryOffer(deps: OfferDeps, offerId: string): P
     },
     orderBy: { createdAt: "desc" },
   });
-  if (!pending?.signRequestRef) return offer;
+  if (!pending?.signRequestRef) {
+    // No request recorded (the server stopped between the two writes): nothing can be signed now.
+    const recorded = await deps.db.ledgerTransaction.count({
+      where: { relatedOfferId: offer.id, type: "NFTokenCreateOffer" },
+    });
+    return recorded === 0 && unsignable(offer.createdAt) ? releaseUnsignedOffer(deps, offer, null) : offer;
+  }
 
   let request: TransactionRequest;
   try {
     request = await deps.transactions().get(pending.signRequestRef);
-  } catch {
+  } catch (error) {
+    // Xaman no longer knows a request that expired long ago. If it was signed, the transaction it
+    // was signed into decides; otherwise nothing can be signed any more.
+    if (isXrplServiceError(error) && error.code === "NOT_FOUND" && unsignable(pending.createdAt)) {
+      return pending.hash
+        ? settleFromTransaction(deps, offer, pending, pending.hash)
+        : releaseUnsignedOffer(deps, offer, pending);
+    }
     return offer; // Wallet service unreachable: try again on the next read.
   }
 
@@ -183,9 +207,78 @@ export async function reconcilePrimaryOffer(deps: OfferDeps, offerId: string): P
       }
       return offer;
     case "CONFIRMED":
-      return applyCreatedOffer(deps, offer, pending, request);
+      return applyCreatedOffer(deps, offer, pending, request.txHash as string);
     default:
       return applyFailedOffer(deps, offer, pending, request);
+  }
+}
+
+/**
+ * Settles an offer awaiting approval whose request can't be signed any more and can't be followed
+ * (never recorded, or forgotten by Xaman), so it doesn't hold its ticket forever. If a matching sell
+ * offer is on the ledger anyway, the request was signed: the offer is left for a person to look at
+ * rather than freed for a second listing.
+ */
+async function releaseUnsignedOffer(
+  deps: OfferDeps,
+  offer: NFTOffer,
+  pending: LedgerTransaction | null,
+): Promise<NFTOffer> {
+  const live = await deps.ledger().getOffers(offer.nftokenId);
+  const signed = live.sellOffers.some(
+    (o) =>
+      o.owner === offer.ownerAddress &&
+      o.amountDrops === offer.amountDrops &&
+      (o.destination ?? null) === (offer.destinationAddress ?? null),
+  );
+  if (signed) {
+    console.warn(`[offers] offer ${offer.id} lost its sign request but a matching offer is on the ledger`);
+    return offer;
+  }
+  const now = new Date();
+  return deps.db.$transaction(async (tx) => {
+    if (pending) {
+      const claimed = await tx.ledgerTransaction.updateMany({
+        where: { id: pending.id, appliedAt: null },
+        data: { status: "DROPPED", appliedAt: now },
+      });
+      if (claimed.count === 0) return tx.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } });
+    }
+    await tx.nFTOffer.updateMany({
+      where: { id: offer.id, state: "PENDING_SIGNATURE" },
+      data: { state: "FAILED", lastSyncedAt: now },
+    });
+    return tx.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } });
+  });
+}
+
+/**
+ * Settles an offer from the transaction its request was signed into, when the request itself can't
+ * be read any more: validated with tesSUCCESS gives ACTIVE (or STALE), validated with a failure gives
+ * FAILED, and never validated, long after it could have been, is released like an unsigned request.
+ * Anything else (the ledger can't be read) is thrown, to be retried on a later read.
+ */
+async function settleFromTransaction(
+  deps: OfferDeps,
+  offer: NFTOffer,
+  pending: LedgerTransaction,
+  txHash: string,
+): Promise<NFTOffer> {
+  try {
+    return await applyCreatedOffer(deps, offer, pending, txHash);
+  } catch (error) {
+    if (isXrplServiceError(error) && error.code === "TX_FAILED") {
+      return applyFailedOffer(deps, offer, pending, {
+        txHash,
+        failureReason: "LEDGER_REJECTED",
+        engineResult: error.rippledError ?? null,
+        ledgerIndex: null,
+      });
+    }
+    if (isXrplServiceError(error) && error.code === "NOT_VALIDATED") {
+      return releaseUnsignedOffer(deps, offer, pending);
+    }
+    throw error;
   }
 }
 
@@ -193,10 +286,10 @@ async function applyCreatedOffer(
   deps: OfferDeps,
   offer: NFTOffer,
   pending: LedgerTransaction,
-  request: TransactionRequest,
+  txHash: string,
 ): Promise<NFTOffer> {
   // Re-check through the single "confirmed" gate before writing anything.
-  const confirmed = await deps.ledger().getValidatedTx(request.txHash as string);
+  const confirmed = await deps.ledger().getValidatedTx(txHash);
   if (confirmed.transactionType !== "NFTokenCreateOffer" || !confirmed.offerIndex) {
     throw new Error(`Transaction ${confirmed.hash} did not create an NFT offer`);
   }
@@ -232,11 +325,15 @@ async function applyCreatedOffer(
       },
     });
     if (claimed.count === 0) return tx.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } });
+    // A ticket checked in meanwhile doesn't change hands through the app (XRPL-036).
+    const used =
+      offer.ticketId !== null && (await tx.checkInRecord.count({ where: { ticketId: offer.ticketId } })) > 0;
     await tx.nFTOffer.updateMany({
       where: { id: offer.id, state: "PENDING_SIGNATURE" },
       data: {
-        // Gone already (accepted or cancelled outside the app): created, but no longer live.
-        state: onLedger ? "ACTIVE" : "STALE",
+        // Gone already (accepted or cancelled outside the app), or the ticket has been used:
+        // created on the ledger, but not live in this app.
+        state: onLedger && !used ? "ACTIVE" : "STALE",
         offerIndex: confirmed.offerIndex,
         createTxHash: confirmed.hash,
         lastSyncedAt: now,
@@ -250,7 +347,7 @@ async function applyFailedOffer(
   deps: OfferDeps,
   offer: NFTOffer,
   pending: LedgerTransaction,
-  request: TransactionRequest,
+  request: Pick<TransactionRequest, "txHash" | "failureReason" | "engineResult" | "ledgerIndex">,
 ): Promise<NFTOffer> {
   const reachedLedger = request.failureReason === "LEDGER_REJECTED";
   const now = new Date();

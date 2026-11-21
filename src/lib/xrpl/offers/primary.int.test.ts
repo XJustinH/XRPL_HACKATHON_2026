@@ -17,8 +17,10 @@ import {
   getEventPrimaryOffers,
   listPrimaryOffers,
   OFFER_MEMO_TYPE,
+  reconcileEventPrimaryOffers,
   reconcilePrimaryOffer,
   requestPrimaryOffer,
+  UNSIGNABLE_AFTER_MS,
   type OfferDeps,
 } from "./primary";
 
@@ -373,6 +375,38 @@ describe("reconcilePrimaryOffer", () => {
     expect((await db.ledgerTransaction.findFirstOrThrow()).status).toBe(ledgerStatus);
     // The ticket can be listed again.
     state.request = txRequest("PENDING");
+    expect(
+      (await requestPrimaryOffer(offerDeps, { session: session(seller.id), ticketId: ticket.id })).offer
+        .state,
+    ).toBe("PENDING_SIGNATURE");
+  });
+});
+
+describe("primary offers whose request was never recorded", () => {
+  it("are released once a request would have expired, so the ticket can be listed again", async () => {
+    const { seller, event, minted } = await seed();
+    const ticket = await minted();
+    const row = (createdAt: Date) =>
+      db.nFTOffer.create({
+        data: {
+          ticketId: ticket.id,
+          nftokenId: ticket.nftokenId as string,
+          kind: "PRIMARY",
+          state: "PENDING_SIGNATURE",
+          ownerAddress: SELLER,
+          amountDrops: "2500000",
+          createdByUserId: seller.id,
+          createdAt,
+        },
+      });
+    const orphan = await row(new Date(Date.now() - UNSIGNABLE_AFTER_MS - 60_000));
+    const { offerDeps } = deps({ request: txRequest("PENDING") });
+
+    await expect(
+      requestPrimaryOffer(offerDeps, { session: session(seller.id), ticketId: ticket.id }),
+    ).rejects.toThrow("This ticket is already being listed");
+    await reconcileEventPrimaryOffers(offerDeps, event.id);
+    expect((await db.nFTOffer.findUniqueOrThrow({ where: { id: orphan.id } })).state).toBe("FAILED");
     expect(
       (await requestPrimaryOffer(offerDeps, { session: session(seller.id), ticketId: ticket.id })).offer
         .state,
