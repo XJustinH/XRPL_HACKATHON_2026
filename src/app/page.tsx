@@ -7,6 +7,7 @@ import { getDb } from "@/lib/db/client";
 import { listPublishedEvents } from "@/features/events/event-store";
 import { EventCard } from "@/features/events/event-card";
 import { getCustomerPreferences } from "@/features/profiles/customer-preferences";
+import { listFollowedSellerIds } from "@/features/profiles/follows";
 import { hasRankingSignals, rankEvents, type ScoredEvent } from "@/features/discovery/ranking";
 
 /**
@@ -36,13 +37,17 @@ export default async function HomePage({
   }
 
   const session = rankingOff ? null : await getCurrentSession().catch(() => null);
-  const preferences = session
-    ? await getCustomerPreferences(getDb(), session.userId).catch(() => null)
-    : null;
+  const [preferences, followedSellerIds] = session
+    ? await Promise.all([
+        getCustomerPreferences(getDb(), session.userId).catch(() => null),
+        listFollowedSellerIds(getDb(), session.userId).catch(() => []),
+      ])
+    : [null, []];
 
   const signals = {
     interests: preferences?.interests ?? [],
     city: preferences?.city ?? null,
+    followedSellerIds,
   };
   const ranking = !rankingOff && hasRankingSignals(signals);
   const items: ScoredEvent[] = page

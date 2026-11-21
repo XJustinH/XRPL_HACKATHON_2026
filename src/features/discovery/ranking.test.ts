@@ -167,14 +167,67 @@ describe("combined signals", () => {
   });
 });
 
+describe("followed organisers (XRPL-090)", () => {
+  const followed = { interests: [], city: null, followedSellerIds: ["usr-1"] } as const;
+
+  it("promotes an event from a followed organiser and names them", () => {
+    const scored = scoreEvent(event(), followed);
+    expect(scored.score).toBeGreaterThan(0);
+    expect(scored.reasons).toContain("You follow Night Market");
+  });
+
+  it("does not promote an organiser the customer does not follow", () => {
+    expect(
+      scoreEvent(event(), { interests: [], city: null, followedSellerIds: ["someone-else"] })
+        .score,
+    ).toBe(0);
+  });
+
+  it("outranks a city match, because following is a deliberate choice", () => {
+    const followedEvent = event({
+      id: "followed",
+      city: "Cork",
+      seller: { id: "usr-1", displayName: "Night Market", city: null, isVerified: false },
+    });
+    const sameCity = event({
+      id: "city",
+      city: "Dublin",
+      seller: { id: "other", displayName: "Someone", city: null, isVerified: false },
+    });
+
+    const ranked = rankEvents([sameCity, followedEvent], {
+      interests: [],
+      city: "Dublin",
+      followedSellerIds: ["usr-1"],
+    });
+    expect(ranked[0]!.event.id).toBe("followed");
+  });
+
+  it("stacks with the other signals", () => {
+    const scored = scoreEvent(
+      event({ city: "Dublin", title: "Comedy night" }),
+      { interests: ["COMEDY"], city: "Dublin", followedSellerIds: ["usr-1"] },
+    );
+    expect(scored.reasons).toHaveLength(3);
+  });
+
+  it("is absent when no follows are supplied at all", () => {
+    expect(scoreEvent(event(), { interests: [], city: null }).score).toBe(0);
+  });
+});
+
 describe("hasRankingSignals", () => {
   it("is false with nothing set", () => {
     expect(hasRankingSignals(NO_SIGNALS)).toBe(false);
     expect(hasRankingSignals({ interests: [], city: "   " })).toBe(false);
+    expect(hasRankingSignals({ interests: [], city: null, followedSellerIds: [] })).toBe(false);
   });
 
-  it("is true with an interest or a city", () => {
+  it("is true with an interest, a city, or a follow", () => {
     expect(hasRankingSignals({ interests: ["MUSIC"], city: null })).toBe(true);
     expect(hasRankingSignals({ interests: [], city: "Dublin" })).toBe(true);
+    expect(
+      hasRankingSignals({ interests: [], city: null, followedSellerIds: ["usr-1"] }),
+    ).toBe(true);
   });
 });

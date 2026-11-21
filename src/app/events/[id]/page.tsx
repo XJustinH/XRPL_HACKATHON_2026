@@ -16,6 +16,8 @@ import { tierPurchaseStates } from "@/features/events/purchase-eligibility";
 import { TicketSelection } from "@/features/events/ticket-selection";
 import { isWishlisted } from "@/features/profiles/wishlist";
 import { WishlistButton } from "@/features/profiles/wishlist-button";
+import { getFriendActivityForEvent } from "@/features/privacy/friend-activity";
+import { FriendsOnEvent } from "@/features/privacy/friends-on-event";
 import { EventReviews } from "@/features/reviews/event-reviews";
 import { ResaleListingCard } from "@/features/transfers/resale-listing-card";
 
@@ -80,6 +82,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const saved = session
     ? await isWishlisted(db, session.userId, id).catch(() => false)
     : false;
+
+  // Privacy-sensitive and decorative: a failure shows nothing (XRPL-085/086).
+  const friendActivity = session
+    ? await getFriendActivityForEvent(db, { viewerId: session.userId, eventId: id }).catch(
+        () => ({ attending: [], interested: [] }),
+      )
+    : { attending: [], interested: [] };
 
   return (
     <>
@@ -170,6 +179,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         offers={offers}
         hasStarted={hasStarted}
       />
+
+      <FriendsOnEvent activity={friendActivity} signedIn={!!session} />
 
       <ResaleSection eventId={event.id} resale={resale} />
 
