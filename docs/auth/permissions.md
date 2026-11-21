@@ -58,6 +58,6 @@ wrong user to prove they're refused.
 ## Not covered (yet)
 
 - **Gate staff assignment:** only the event's owner can scan. There is no way to let a separate ORGANISER
-  account (e.g. the seeded `[DEMO] Door Team`) scan someone else's event. The demo runs the scanner as the
+  account (e.g. the seeded `Door Team`) scan someone else's event. The demo runs the scanner as the
   event's seller. Add an event-staff table if a demo needs separate door staff.
 - **Admin role:** none. Role changes happen only through seeding or the database.

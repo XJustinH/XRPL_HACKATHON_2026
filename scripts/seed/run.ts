@@ -35,6 +35,12 @@ async function main(): Promise<void> {
     if (summary.demoFlagsRestored > 0) {
       console.log(`  Restored isDemo on ${summary.demoFlagsRestored} existing demo user(s).`);
     }
+    const { users: renamedUsers, events: renamedEvents } = summary.unlabelled;
+    if (renamedUsers > 0 || renamedEvents > 0) {
+      console.log(
+        `  Dropped the "${DEMO_LABEL} " name prefix from ${renamedUsers} user(s) and ${renamedEvents} event(s).`,
+      );
+    }
     console.log(
       "Done. No wallets, ticket NFTs, offers or ledger transactions were seeded: those come from live XRPL Testnet activity.",
     );

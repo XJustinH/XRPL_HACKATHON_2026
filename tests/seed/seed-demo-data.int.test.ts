@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { listDemoPersonas } from "@/lib/auth/onboarding";
 import { createPrismaClient } from "@/lib/db/client";
-import { DEMO_IDS, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
+import { DEMO_IDS, DEMO_LABEL, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
 import { SeedConflictError, seedDemoData } from "../../scripts/seed/seed-demo-data";
 
 /**
@@ -42,6 +42,7 @@ describe("seedDemoData", () => {
       events: { created: demoEvents.length, existing: 0 },
       tiers: { created: demoTiers.length, existing: 0 },
       demoFlagsRestored: 0,
+      unlabelled: { users: 0, events: 0 },
     });
     expect(await counts()).toEqual(fixtureCounts);
 
@@ -66,8 +67,80 @@ describe("seedDemoData", () => {
       events: { created: 0, existing: demoEvents.length },
       tiers: { created: 0, existing: demoTiers.length },
       demoFlagsRestored: 0,
+      unlabelled: { users: 0, events: 0 },
     });
     expect(await counts()).toEqual(fixtureCounts);
+  });
+
+  /**
+   * Covers the database seeded before the `[DEMO] ` name prefix was dropped from the fixtures:
+   * `createMany` skips those rows, so only the rename below clears the old names.
+   */
+  describe("dropping the old [DEMO] name prefix", () => {
+    const relabel = async () => {
+      for (const user of demoUsers) {
+        await db.user.update({
+          where: { id: user.id },
+          data: { displayName: `${DEMO_LABEL} ${user.displayName}` },
+        });
+      }
+      for (const event of demoEvents) {
+        await db.event.update({
+          where: { id: event.id },
+          data: { title: `${DEMO_LABEL} ${event.title}` },
+        });
+      }
+    };
+
+    it("renames demo users and events that still carry it", async () => {
+      await seedDemoData(db);
+      await relabel();
+
+      const summary = await seedDemoData(db);
+
+      expect(summary.unlabelled).toEqual({
+        users: demoUsers.length,
+        events: demoEvents.length,
+      });
+      const users = await db.user.findMany({ where: { isDemo: true } });
+      expect(users.every((u) => !u.displayName.startsWith(DEMO_LABEL))).toBe(true);
+      const events = await db.event.findMany();
+      expect(events.every((e) => !e.title.startsWith(DEMO_LABEL))).toBe(true);
+    });
+
+    it("leaves the title of an event with minted tickets alone", async () => {
+      await seedDemoData(db);
+      await relabel();
+      // The title of a minted event is already in its tickets' NFT metadata on the ledger.
+      await db.ticketTier.update({
+        where: { id: DEMO_IDS.tiers.headlineGeneralAdmission },
+        data: { mintedQuantity: 1 },
+      });
+
+      const summary = await seedDemoData(db);
+
+      expect(summary.unlabelled.events).toBe(demoEvents.length - 1);
+      const headline = await db.event.findUniqueOrThrow({
+        where: { id: DEMO_IDS.events.headlineShow },
+      });
+      expect(headline.title).toBe(`${DEMO_LABEL} ${demoEvents[0].title}`);
+    });
+
+    it("does not touch a demo name edited since it was seeded", async () => {
+      await seedDemoData(db);
+      await db.user.update({
+        where: { id: DEMO_IDS.users.customer },
+        data: { displayName: "Renamed during a demo" },
+      });
+
+      const summary = await seedDemoData(db);
+
+      expect(summary.unlabelled.users).toBe(0);
+      const customer = await db.user.findUniqueOrThrow({
+        where: { id: DEMO_IDS.users.customer },
+      });
+      expect(customer.displayName).toBe("Renamed during a demo");
+    });
   });
 
   it("makes exactly the seeded users available as demo login personas", async () => {

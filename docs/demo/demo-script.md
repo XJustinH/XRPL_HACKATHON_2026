@@ -9,7 +9,7 @@ Nothing here runs on Mainnet and no real money moves. Say so at the start.
 
 1. **Deployment.** Deploy `main` and run `npm run db:deploy`, then `npm run db:seed`
    ([seed-data.md](../seed-data.md)). Set:
-   - `DEMO_LOGIN_ENABLED=true`, so the seeded `[DEMO]` accounts can sign in;
+   - `DEMO_LOGIN_ENABLED=true`, so the seeded demo accounts can sign in;
    - `XAMAN_API_KEY` and `XAMAN_API_SECRET`;
    - `APP_BASE_URL` and `TICKET_METADATA_BASE_URL` to the public https address, so Xaman and the explorer
      can show each ticket's details.
@@ -50,9 +50,9 @@ account must prove its wallet again in each session.
 
 | Person | Demo account | Wallet |
 |---|---|---|
-| Seller, and organiser at the door | `[DEMO] The Testnet Tones` | demo-seller |
-| Buyer | `[DEMO] Alex Fan` | demo-buyer |
-| New owner | `[DEMO] Sam Friend` | demo-new-owner |
+| Seller, and organiser at the door | `The Testnet Tones` | demo-seller |
+| Buyer | `Alex Fan` | demo-buyer |
+| New owner | `Sam Friend` | demo-new-owner |
 
 ## The script
 
@@ -93,7 +93,7 @@ Say which is which. Don't present anything in the last two rows as live.
 | **Confirmed on Testnet** | Minting, primary sale, resale, private sale, gift, cancelling an offer | Each has a validated transaction on [testnet.xrpl.org](https://testnet.xrpl.org), linked from the app |
 | **Confirmed on Testnet** | Ownership at the door and in My tickets | Read from a validated ledger at that moment |
 | **Real, in the app's database** | Events, accounts, the check-in record, analytics, the resale rule | Not ledger transactions. One admission per ticket is enforced by the database |
-| **Simulated** | The `[DEMO]` accounts and seeded events | Labelled `[DEMO]` wherever they appear |
+| **Simulated** | The demo accounts and seeded events | Fictional venues marked `(demo venue)`, and every event description opens with a notice |
 | **Simulated** | Payment for physical merchandise | The checkout says the payment is simulated. No card details are taken |
 | **Needs setup** | Spotify listening status | Works only where a Spotify app's credentials are configured |
 | **Not built** | Mainnet, real-money payments, transfer-fee royalties ([transfer-fees.md](../xrpl/transfer-fees.md)) | `XRPL_NETWORK` accepts only `testnet` or `devnet` |

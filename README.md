@@ -174,7 +174,7 @@ validated ledgers. Nothing is shown as done until the ledger has validated it wi
   editing an event after minting changes what wallets and explorers show.
 - **Buying an NFT doesn't transfer copyright** in any artwork or media.
 - **Payments for physical merchandise are simulated.** No card details are collected.
-- **Accounts and sessions are for a prototype:** the seeded `[DEMO]` accounts sign in without a password
+- **Accounts and sessions are for a prototype:** the seeded demo accounts sign in without a password
   when `DEMO_LOGIN_ENABLED` is on.
 
 What is live, simulated and deferred is listed in

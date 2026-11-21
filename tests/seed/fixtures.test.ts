@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { AppId, Drops, EventStatus, UserRole } from "@/contracts";
-import { DEMO_IDS, DEMO_LABEL, DEMO_NOTICE, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
+import { DEMO_IDS, DEMO_NOTICE, demoEvents, demoTiers, demoUsers } from "../../scripts/seed/fixtures";
 
 /** Static checks on the XRPL-008 demo fixtures (no database needed). */
 
@@ -23,13 +23,12 @@ describe("demo seed fixtures", () => {
     expect(published.some((e) => demoTiers.some((t) => t.eventId === e.id))).toBe(true);
   });
 
-  it("labels every user, event and tier as demo content", () => {
-    for (const u of demoUsers) {
-      expect(u.displayName.startsWith(`${DEMO_LABEL} `), u.displayName).toBe(true);
-      expect(u.isDemo, u.displayName).toBe(true);
-    }
+  // Titles and display names are deliberately unlabelled: they are what the audience reads during
+  // the demo. The content is still identifiable as seeded, by `isDemo`, the fixed `5eed0000-` IDs,
+  // and the notices below.
+  it("marks every user, event and tier as demo content", () => {
+    for (const u of demoUsers) expect(u.isDemo, u.displayName).toBe(true);
     for (const e of demoEvents) {
-      expect(e.title.startsWith(`${DEMO_LABEL} `), e.title).toBe(true);
       expect(e.description.startsWith(DEMO_NOTICE), e.title).toBe(true);
       expect(e.venue, e.title).toMatch(/\(demo venue\)$/);
     }

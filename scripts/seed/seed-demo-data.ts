@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
-import { demoEvents, demoTiers, demoUsers } from "./fixtures";
+import { DEMO_LABEL, demoEvents, demoTiers, demoUsers } from "./fixtures";
 
 /**
  * Idempotent demo seed (XRPL-008).
@@ -28,6 +28,8 @@ export type SeedSummary = {
   tiers: SeedTableSummary;
   /** Existing demo users whose `isDemo` flag was false and has been set back to true. */
   demoFlagsRestored: number;
+  /** Existing rows still carrying the old `[DEMO] ` name prefix, now renamed without it. */
+  unlabelled: { users: number; events: number };
 };
 
 export class SeedConflictError extends Error {
@@ -67,11 +69,50 @@ export async function seedDemoData(db: PrismaClient): Promise<SeedSummary> {
       data: { isDemo: true },
     });
     // Demo events seeded before events had a category get one; a category set since is kept.
+    // Artwork is backfilled on the same terms: only where the column is still null, so a seller
+    // who cleared or replaced the demo artwork during a demo does not have it reinstated.
     for (const event of demoEvents) {
       await tx.event.updateMany({
         where: { id: event.id, category: null },
         data: { category: event.category },
       });
+      await tx.event.updateMany({
+        where: { id: event.id, artworkUrl: null },
+        data: { artworkUrl: event.artworkUrl },
+      });
+    }
+
+    /*
+     * Drop the `[DEMO] ` prefix that titles and display names used to carry.
+     *
+     * `createMany` skips rows that already exist, so a database seeded before the prefix was
+     * removed would otherwise keep the old names for good. Each update matches the exact previous
+     * labelled value rather than overwriting whatever is stored: a name edited since is left
+     * alone, and the update becomes a no-op once it has run.
+     */
+    let renamedUsers = 0;
+    for (const user of demoUsers) {
+      const { count } = await tx.user.updateMany({
+        where: { id: user.id, displayName: `${DEMO_LABEL} ${user.displayName}` },
+        data: { displayName: user.displayName },
+      });
+      renamedUsers += count;
+    }
+
+    let renamedEvents = 0;
+    for (const event of demoEvents) {
+      const { count } = await tx.event.updateMany({
+        where: {
+          id: event.id,
+          title: `${DEMO_LABEL} ${event.title}`,
+          // An event with minted tickets keeps its old title: the title is copied into the NFT
+          // metadata at mint time (NFT_RELEVANT_FIELDS in publish-rules.ts) and the ledger holds
+          // that immutably, so renaming it here would leave the token describing another event.
+          tiers: { none: { mintedQuantity: { gt: 0 } } },
+        },
+        data: { title: event.title },
+      });
+      renamedEvents += count;
     }
 
     assertAllPresent(
@@ -95,6 +136,7 @@ export async function seedDemoData(db: PrismaClient): Promise<SeedSummary> {
       events: summarise(demoEvents.length, events.count),
       tiers: summarise(demoTiers.length, tiers.count),
       demoFlagsRestored: restored.count,
+      unlabelled: { users: renamedUsers, events: renamedEvents },
     };
   });
 }
