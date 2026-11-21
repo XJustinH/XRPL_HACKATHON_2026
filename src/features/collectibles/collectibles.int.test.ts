@@ -39,7 +39,9 @@ const BASE_URL = "http://localhost:3000";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
 
 beforeEach(async () => {
-  await db.$executeRawUnsafe(`TRUNCATE "CollectibleToken","Collectible","MediaAsset","Session","User" CASCADE`);
+  // LedgerTransaction has no foreign keys, so truncating User doesn't clear it: rows left by other test
+  // files would break the check that minting a collectible records nothing there.
+  await db.$executeRawUnsafe(`TRUNCATE "CollectibleToken","Collectible","MediaAsset","LedgerTransaction","Session","User" CASCADE`);
 });
 afterAll(async () => {
   await db.$disconnect();
