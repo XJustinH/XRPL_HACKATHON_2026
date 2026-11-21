@@ -13,14 +13,24 @@ npm run db:seed      # insert demo data (prints what was created vs already pres
 
 | Kind | Fixed ID (`DEMO_IDS`) | Record |
 |---|---|---|
-| Seller (artist) | `users.artistSeller` | `[DEMO] The Testnet Tones` |
-| Seller (venue) | `users.venueSeller` | `[DEMO] The Ledger Rooms` |
-| Organiser | `users.organiser` | `[DEMO] Door Team` |
-| Customer | `users.customer` | `[DEMO] Alex Fan` (buyer) |
-| Customer | `users.secondCustomer` | `[DEMO] Sam Friend` (gift / private-sale / resale recipient) |
+| Seller (artist) | `users.artistSeller` | `The Testnet Tones` |
+| Seller (venue) | `users.venueSeller` | `The Ledger Rooms` |
+| Organiser | `users.organiser` | `Door Team` |
+| Customer | `users.customer` | `Alex Fan` (buyer) |
+| Customer | `users.secondCustomer` | `Sam Friend` (gift / private-sale / resale recipient) |
 | Event, published | `events.headlineShow` | The Testnet Tones live in Dublin, 12 Mar 2027. Tiers: General Admission 2.5 XRP × 3, VIP 10 XRP × 1 |
 | Event, published | `events.openMicNight` | Open mic night hosted by the venue seller, Dublin, 2 Apr 2027. Tier: Standard 1 XRP × 10 |
 | Event, draft | `events.corkDraft` | Unpublished Cork date for the artist's seller dashboard. Tier: General Admission 3 XRP × 5 |
+| Event, published | `events.warehouseParty` | Late-night club event, Dublin, 20 Mar 2027. Tier: Entry 1.5 XRP × 8 |
+| Event, published | `events.djAllNighter` | Club night with resident DJs, Dublin, 10 Apr 2027. Tier: Entry 2 XRP × 6 |
+| Event, published | `events.neonClubNight` | Weekly club night, Galway, 23 Apr 2027. Tier: Entry 0.8 XRP × 4 |
+| Event, published | `events.ledgerTalks` | Evening of talks, Dublin, 14 May 2027. Tier: Seat 0.5 XRP × 10 |
+| Event, published | `events.summerFestival` | One-day festival, Cork, 17 Jul 2027. Tier: Day Ticket 4.5 XRP × 12 |
+
+Every event carries artwork, as a URL on Unsplash's CDN rather than a file in the repository. The
+cards render it with a plain `img` that hides a broken link, so a dead URL costs a placeholder
+rather than an error. The events span several categories so the category filter has something to
+filter (XRPL-059).
 
 Tier supplies are small on purpose. The headline show can sell out during a live demo, and selling out
 is what unlocks in-app resale (XRPL-037). Prices are stored as integer drops (1 XRP = 1,000,000 drops).
@@ -41,7 +51,8 @@ import { DEMO_IDS } from "../scripts/seed/fixtures"; // path relative to your fi
 
 ## How demo content is labelled
 
-- User display names and event titles start with `[DEMO]`.
+- Display names and event titles are **not** labelled: they are what the audience reads during the
+  demo. A database seeded before this changed is renamed on the next run (see below).
 - Event descriptions start with a notice that the event is not real and its tickets have no monetary
   value. Venue names end in `(demo venue)`, and tier descriptions say "Demo tier".
 - Demo users have `User.isDemo = true`. Code should detect demo accounts with this flag, not by name.
@@ -55,6 +66,12 @@ import { DEMO_IDS } from "../scripts/seed/fixtures"; // path relative to your fi
   as the app left them, so a re-run never resets inventory, publication state or demo edits.
 - **Except `isDemo`.** It is set back to `true` on the five demo users on every run, because a demo user
   without it silently drops out of demo login. The seed output says when it restored any.
+- **Except names still carrying `[DEMO] `.** Rows seeded before the prefix was dropped are renamed,
+  since create-only would otherwise keep the old names for good. Only the exact previous labelled
+  value is matched, so a name edited since is left alone, and an event with minted tickets keeps its
+  title: that title is already in its tickets' NFT metadata on the ledger.
+- **Except empty categories and artwork.** Both are filled in where still null, so events seeded
+  before those columns existed gain them without overwriting anything set since.
 - **Additive.** Only the fixture IDs are touched. Nothing else is changed or deleted.
 - **Atomic.** One transaction, so a failed run leaves no partial demo data.
 - **Safe to run concurrently.** Inserts use `ON CONFLICT DO NOTHING`.
