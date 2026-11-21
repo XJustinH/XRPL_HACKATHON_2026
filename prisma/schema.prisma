@@ -118,6 +118,11 @@ model User {
   reviews               Review[]           @relation("ReviewAuthor")
   friendConnectionsLow  FriendConnection[] @relation("FriendLow")
   friendConnectionsHigh FriendConnection[] @relation("FriendHigh")
+  sellerPosts           SellerPost[]       @relation("SellerPostAuthor")
+  postLikes             PostLike[]         @relation("PostLiker")
+  postComments          PostComment[]      @relation("PostCommentAuthor")
+  contentReports        ContentReport[]    @relation("ReportReporter")
+  notifications         Notification[]     @relation("NotificationRecipient")
   blocksMade            UserBlock[]        @relation("Blocker")
   blocksReceived        UserBlock[]        @relation("Blocked")
   products              PhysicalProduct[]  @relation("ProductSeller")
@@ -239,6 +244,7 @@ model Event {
   checkInChallenges CheckInChallenge[]
   checkIns          CheckInRecord[]
   reviews           Review[]
+  notifications     Notification[]
   products          PhysicalProduct[]
   wishlistedBy      Wishlist[]
 
@@ -448,6 +454,9 @@ model Review {
   checkInRecordId String?   @unique @db.Uuid
   /// Set when a moderator hides the review. Hidden reviews are not shown publicly.
   hiddenAt        DateTime? @db.Timestamptz(3)
+  /// Who hid it and why (XRPL-083). Plain ids, not foreign keys: an audit note only.
+  hiddenById      String?   @db.Uuid
+  hiddenReason    String?
   createdAt       DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
 
@@ -458,6 +467,129 @@ model Review {
 
   @@unique([eventId, authorId])
   @@index([eventId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Community (XRPL-080 to XRPL-083, XRPL-093): seller posts, likes, comments, reports, notifications
+// ---------------------------------------------------------------------------
+
+/// A seller's announcement on their profile (XRPL-080). Only seller and organiser accounts may write
+/// one; the API checks that. A hidden post (XRPL-083) is not shown publicly. The body is 1 to 2000
+/// characters (CHECK SellerPost_body_length).
+model SellerPost {
+  id           String    @id @default(uuid()) @db.Uuid
+  sellerId     String    @db.Uuid
+  body         String
+  /// Optional https image. Validated on write and checked again before rendering.
+  imageUrl     String?
+  /// Set when moderation hides the post (XRPL-083), with who hid it and why.
+  hiddenAt     DateTime? @db.Timestamptz(3)
+  hiddenById   String?   @db.Uuid
+  hiddenReason String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  seller        User           @relation("SellerPostAuthor", fields: [sellerId], references: [id], onDelete: Cascade)
+  likes         PostLike[]
+  comments      PostComment[]
+  notifications Notification[]
+
+  @@index([sellerId, createdAt])
+}
+
+/// userId likes postId (XRPL-081). One row per pair, so an account can like a post only once.
+model PostLike {
+  postId    String   @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  post SellerPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User       @relation("PostLiker", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId])
+}
+
+/// A comment on a seller post (XRPL-082). Always attached to a post: customers have no top-level
+/// posts. Plain text of 1 to 500 characters (CHECK PostComment_body_length). Hidden comments are not
+/// shown publicly.
+model PostComment {
+  id           String    @id @default(uuid()) @db.Uuid
+  postId       String    @db.Uuid
+  authorId     String    @db.Uuid
+  body         String
+  hiddenAt     DateTime? @db.Timestamptz(3)
+  hiddenById   String?   @db.Uuid
+  hiddenReason String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  post   SellerPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User       @relation("PostCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  /// For the rate limit: an author's recent comments.
+  @@index([authorId, createdAt])
+}
+
+enum ReportTargetType {
+  REVIEW
+  COMMENT
+  POST
+}
+
+enum ReportStatus {
+  OPEN
+  /// The reported content was hidden.
+  ACTIONED
+  DISMISSED
+}
+
+/// A user's report of a review, comment or post (XRPL-083). targetId is the id of the row named by
+/// targetType. It is deliberately not a foreign key, so resolving a report never deletes anything
+/// else. One report per reporter per item.
+model ContentReport {
+  id           String           @id @default(uuid()) @db.Uuid
+  reporterId   String           @db.Uuid
+  targetType   ReportTargetType
+  targetId     String           @db.Uuid
+  reason       String
+  details      String           @default("")
+  status       ReportStatus     @default(OPEN)
+  resolvedById String?          @db.Uuid
+  resolvedAt   DateTime?        @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+
+  reporter User @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([reporterId, targetType, targetId])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+}
+
+enum NotificationKind {
+  NEW_EVENT
+  NEW_POST
+}
+
+/// An in-app notification (XRPL-093): a seller the user follows published an event or a post.
+/// Exactly one of eventId and postId is set (CHECK Notification_one_subject). One notification per
+/// user per event and per post, so generating them again cannot duplicate.
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  kind      NotificationKind
+  eventId   String?          @db.Uuid
+  postId    String?          @db.Uuid
+  readAt    DateTime?        @db.Timestamptz(3)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  user  User        @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  event Event?      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  post  SellerPost? @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@unique([userId, postId])
+  @@index([userId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
