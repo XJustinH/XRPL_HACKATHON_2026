@@ -77,6 +77,8 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | A friend pair is stored once, lower ID first; the requester is one of the pair; `respondedAt` is set exactly when accepted (XRPL-084) | `FriendConnection @@unique([userLowId, userHighId])`, CHECK `FriendConnection_pair_order`, `FriendConnection_requester_in_pair`, `FriendConnection_responded_when_accepted` |
 | One block per direction, never of yourself | `UserBlock @@id([blockerId, blockedId])`, CHECK `UserBlock_not_self` |
 | "No category" is NULL, never an empty string (XRPL-015/059) | CHECK `Event_category_format` |
+| A product has a positive drops price, non-negative stock, at most 6 images, and a publish date once published (XRPL-064) | CHECK `PhysicalProduct_priceDrops_positive`, `_stock_nonnegative`, `_images_limit`, `_published_has_date`; `imageUrls` NOT NULL |
+| A product links only to its seller's own event | trigger `PhysicalProduct_event_same_seller` |
 
 Every timestamp is `timestamptz` (UTC). Every app ID is a UUID. Ledger identifiers (`NFTokenID`, offer index,
 tx hash) are separate 64-hex strings, canonicalised to upper case by the contracts.
