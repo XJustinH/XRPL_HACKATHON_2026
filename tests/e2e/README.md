@@ -33,8 +33,8 @@ hover.
 |---|---|
 | Seller event creation | Create a draft, add a tier and publish, by touch |
 | Form errors | An end time before the start is refused in words, tied to its field (`aria-describedby`) |
-| Buyer checkout | Open the event, pick a ticket, review the order, and reach the connect-wallet step |
-| My Tickets | What it says to a visitor, and to an account with no wallet |
+| Buyer checkout | Open the event, pick a ticket and review the order. Where offers are confirmed on the ledger first (XRPL-035), the fixture ticket is refused, and the test checks that the page says why and offers the way back |
+| My Tickets | What it says to a visitor, and to an account with no wallet, then the connect-wallet page |
 | Door scanner | Type a code, see a valid ticket, admit it, then see a second scan refused |
 | Other screens | 16 more pages a visitor, a customer and a seller reach |
 | Browser controls | The page tells the browser which colours it uses, so date pickers and menus match it |
