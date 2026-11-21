@@ -337,6 +337,10 @@ export const TransactionPurpose = z.enum([
   "ACCEPT_TRANSFER_OFFER",
   /** The offer's owner withdrawing an open sell offer of any kind (XRPL-042). */
   "CANCEL_OFFER",
+  /** Digital collectibles (XRPL-073/074): artist NFTs that are not tickets. */
+  "MINT_COLLECTIBLE",
+  "CREATE_COLLECTIBLE_OFFER",
+  "ACCEPT_COLLECTIBLE_OFFER",
 ]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
