@@ -153,6 +153,7 @@ function deps(world: World) {
     account: BUYER,
     nftokenId: NFT,
     offerIndex: null,
+    acceptedSellOfferIndex: OFFER_INDEX,
     explorerUrl: `https://testnet.xrpl.org/transactions/${hash}`,
   }));
   const verifyOwner = vi.fn(async (nftokenId: string, address: string) => ({

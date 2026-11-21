@@ -100,6 +100,7 @@ function deps(state: { request: TransactionRequest; nftokenId?: string; uri?: st
     account: ISSUER,
     nftokenId: state.nftokenId ?? null,
     offerIndex: null,
+    acceptedSellOfferIndex: null,
     explorerUrl: `https://testnet.xrpl.org/transactions/${TX_HASH}`,
   }));
   const verifyOwner = vi.fn(async () => ({
