@@ -30,6 +30,7 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 | The holder checks in once, and a second check-in is rejected. The seller (no longer the owner) can't get a door code; an unapproved code is refused; another wallet can't approve the holder's code; the holder approves with a Xaman-style sign-in signed by their own Testnet key, which the app verifies; ownership is read from a validated ledger at the door; a repeat scan and a fresh code for the used ticket are refused; exactly one attendance record | Runs |
 | The organiser's figures match the real sale and entry: inventory (1 of 2 sold), analytics (1 XRP revenue, 1 checked in, nothing pending), and in-app resale still closed while a ticket is unsold | Runs |
 | Only someone who was checked in can review the event | Runs |
+| An **NFT transfer fee** (`transfer-fee.testnet.test.ts`, XRPL-094): an investigation with its own fixtures, not app behaviour. An NFT minted with a 5% fee pays the issuer nothing on the issuer's own sale, 5% of a resale out of the seller's proceeds, and nothing on a free transfer. See `docs/xrpl/transfer-fees.md` | Runs |
 
 The test waits for each validated ledger outcome by polling until it is final (`support/wait.ts`), never
 for a fixed time.
