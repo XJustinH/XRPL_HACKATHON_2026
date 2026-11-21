@@ -26,7 +26,7 @@ export type StoredConnection = {
   respondedAt: Date | null;
 };
 
-/** Friendship storage. Waits on Agent A's FriendConnection / UserBlock tables. */
+/** Friendship storage: `PrismaFriendStore` on Agent A's FriendConnection / UserBlock tables. */
 export interface FriendStore {
   findPair(userLowId: string, userHighId: string): Promise<StoredConnection | null>;
   findById(id: string): Promise<StoredConnection | null>;

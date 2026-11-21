@@ -228,10 +228,9 @@ they already posted), and plain messages for non-attendees and signed-out visito
 
 ## Friend connections (XRPL-084)
 
-**Status:** logic, routes and the `/friends` page are done. **Friendship storage waits on Agent A's
-`FriendConnection` and `UserBlock` tables** (schema request in the PR). Until they land, friendship
-routes answer 503 ("Friends aren't available yet"). The friend-list privacy setting already works,
-since it lives in `User.settings`.
+**Status:** live. Friendships are stored in Agent A's `FriendConnection` and `UserBlock` tables through
+`PrismaFriendStore` (`src/features/friends/prisma-store.ts`). The friend-list privacy setting lives in
+`User.settings`.
 
 - **Opt-in by design** (handoff §2.2). People connect by sharing a **friend code**, which is their
   account ID; there is no name search. A friend list is visible only to its owner unless they choose
@@ -252,5 +251,7 @@ since it lives in `User.settings`.
 | `PATCH /api/friends/settings` `{ friendsVisibility }` | `ONLY_ME` (default) or `FRIENDS` |
 | `GET /api/users/:id/friends` | `{ visible, friends }`; a hidden list looks the same as an empty one |
 
-**When the tables land:** add a Prisma `FriendStore` and swap `unavailableFriendStore` in
-`src/features/friends/server.ts`. Nothing else changes.
+The tables do part of the work: the unique index on the ordered pair is what stops two requests between
+the same people, and deleting an account removes its connections and blocks.
+`unavailableFriendStore` (503 for everything) is kept in `server.ts` to switch friendships off quickly if
+ever needed.
