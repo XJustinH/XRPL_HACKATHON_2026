@@ -56,8 +56,9 @@ What they don't cover:
   the ledger. The camera is not exercised; the code is typed, as a handheld scanner would.
 - **A real phone and a screen reader.** These are emulated sizes in Chromium, not devices.
 
-The checkout test needs a ticket to sell, and the demo seed has none (tickets must come from validated
-ledger transactions). `listed-ticket-fixture.ts` adds one listed ticket to the `*_test` database only.
+The checkout test needs a ticket to sell, and the organiser's check-in chart needs a check-in to draw. The
+demo seed has neither, because tickets must come from validated ledger transactions. `ticket-fixtures.ts`
+adds one listed ticket and one checked-in ticket to the `*_test` database only.
 
 ## How they run
 

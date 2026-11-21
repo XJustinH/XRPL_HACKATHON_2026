@@ -29,8 +29,8 @@ const HOLDER_WALLET = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
 
 test.beforeAll(() => {
   const url = process.env.TEST_DATABASE_URL ?? "";
-  // One listed ticket, so the event page and the checkout page have something to sell.
-  execSync("npx tsx tests/e2e/listed-ticket-fixture.ts", {
+  // A listed ticket for the checkout, and a checked-in one so the organiser's chart has data.
+  execSync("npx tsx tests/e2e/ticket-fixtures.ts", {
     stdio: "inherit",
     env: { ...process.env, DATABASE_URL: url },
   });
