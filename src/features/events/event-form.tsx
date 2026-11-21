@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { EventDraftInput, type EventView } from "@/contracts";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_LABELS, EventDraftInput, type EventView } from "@/contracts";
 import { postJson } from "@/features/onboarding/post-json";
 import { FieldError } from "./field-error";
 
@@ -14,7 +14,7 @@ import { FieldError } from "./field-error";
  * re-validates regardless — this is a usability layer, not a security one.
  */
 
-type Field = "title" | "description" | "startsAt" | "endsAt" | "venue" | "city" | "artworkUrl";
+type Field = "title" | "description" | "startsAt" | "endsAt" | "venue" | "city" | "artworkUrl" | "category";
 
 type FieldErrors = Partial<Record<Field, string>>;
 
@@ -88,6 +88,8 @@ export function EventForm() {
       venue: String(formData.get("venue") ?? ""),
       city: String(formData.get("city") ?? ""),
       artworkUrl: String(formData.get("artworkUrl") ?? ""),
+      // "No category" submits an empty value, stored as null.
+      category: String(formData.get("category") ?? "") || null,
     };
 
     const parsed = EventDraftInput.safeParse(candidate);
@@ -244,6 +246,30 @@ export function EventForm() {
             />
             <FieldError id={errorId("city")} message={fieldErrors.city} />
           </div>
+        </div>
+
+        <div>
+          <label htmlFor={fieldId("category")} className={labelClass}>
+            Category
+          </label>
+          <select
+            id={fieldId("category")}
+            name="category"
+            defaultValue=""
+            className={inputClass}
+            {...errorProps("category")}
+          >
+            <option value="">No category</option>
+            {EVENT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {EVENT_CATEGORY_LABELS[category]}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-sm text-muted">
+            Lets customers find it when they filter by category. You can change it later.
+          </p>
+          <FieldError id={errorId("category")} message={fieldErrors.category} />
         </div>
 
         <div>

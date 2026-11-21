@@ -14,6 +14,7 @@ function event(overrides: Partial<EventView> = {}): EventView {
     city: "Dublin",
     status: "PUBLISHED",
     artworkUrl: null,
+    category: null,
     tiers: [],
     publishedAt: "2026-11-01T00:00:00.000Z",
     ...overrides,
@@ -229,5 +230,34 @@ describe("hasRankingSignals", () => {
     expect(
       hasRankingSignals({ interests: [], city: null, followedSellerIds: ["usr-1"] }),
     ).toBe(true);
+  });
+});
+
+describe("declared categories (Event.category)", () => {
+  it("matches an interest on the event's declared category, stated as a fact", () => {
+    const scored = scoreEvent(event({ title: "An evening out", description: "", category: "COMEDY" }), {
+      interests: ["COMEDY"],
+      city: null,
+    });
+    expect(scored.score).toBeGreaterThan(0);
+    expect(scored.reasons).toEqual(["Comedy, one of your interests"]);
+  });
+
+  it("doesn't guess from the words when the seller chose a different category", () => {
+    // "Live" and "gig" would suggest music, but the seller said comedy.
+    const scored = scoreEvent(event({ title: "Live comedy gig", description: "", category: "COMEDY" }), {
+      interests: ["MUSIC"],
+      city: null,
+    });
+    expect(scored.score).toBe(0);
+    expect(scored.reasons).toEqual([]);
+  });
+
+  it("still guesses from the words for an event without a category", () => {
+    const scored = scoreEvent(event({ title: "Live band gig", description: "", category: null }), {
+      interests: ["MUSIC"],
+      city: null,
+    });
+    expect(scored.reasons).toEqual(["Looks like live music"]);
   });
 });

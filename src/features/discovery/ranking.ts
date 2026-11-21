@@ -32,11 +32,10 @@ const MAX_INTEREST_MATCHES = 3;
 /**
  * Words that suggest a category, used to match an interest against an event.
  *
- * **Interim signal.** Events have no `category` column yet, so an interest is
- * matched against the event's title and description instead. It is a weaker
- * signal than a declared category and is labelled as a guess in the UI. When
- * `Event.category` exists, `scoreEvent` should prefer an exact category match
- * and keep this only as a fallback for uncategorised events.
+ * **Fallback only.** An event whose seller chose a category (`Event.category`)
+ * is matched on that exactly. These words are used only for events without one,
+ * matched against the title and description. That is a weaker signal, so it is
+ * labelled as a guess in the UI.
  */
 const CATEGORY_KEYWORDS: Record<EventCategory, readonly string[]> = {
   MUSIC: ["music", "live", "band", "gig", "concert", "acoustic", "singer", "tour"],
@@ -72,12 +71,16 @@ function normalise(value: string): string {
   return value.trim().toLowerCase();
 }
 
-/** True when a category's words appear in the event's text. */
-function matchesCategory(event: EventView, category: EventCategory): boolean {
+/**
+ * How an event matches an interest: its declared category, a guess from its words
+ * when it has no category, or not at all.
+ */
+function matchesCategory(event: EventView, category: EventCategory): "DECLARED" | "GUESSED" | null {
+  if (event.category) return event.category === category ? "DECLARED" : null;
   const words = CATEGORY_KEYWORDS[category];
-  if (words.length === 0) return false;
+  if (words.length === 0) return null;
   const haystack = `${normalise(event.title)} ${normalise(event.description)}`;
-  return words.some((word) => haystack.includes(word));
+  return words.some((word) => haystack.includes(word)) ? "GUESSED" : null;
 }
 
 export function scoreEvent(event: EventView, signals: RankingSignals): ScoredEvent {
@@ -99,11 +102,16 @@ export function scoreEvent(event: EventView, signals: RankingSignals): ScoredEve
   let matched = 0;
   for (const interest of signals.interests) {
     if (matched >= MAX_INTEREST_MATCHES) break;
-    if (!matchesCategory(event, interest)) continue;
+    const match = matchesCategory(event, interest);
+    if (!match) continue;
     score += INTEREST_WEIGHT;
     matched += 1;
-    // "Looks like" is deliberate: this is a text guess, not a declared category.
-    reasons.push(`Looks like ${EVENT_CATEGORY_LABELS[interest].toLowerCase()}`);
+    // "Looks like" only for a text guess; a declared category is stated as a fact.
+    reasons.push(
+      match === "DECLARED"
+        ? `${EVENT_CATEGORY_LABELS[interest]}, one of your interests`
+        : `Looks like ${EVENT_CATEGORY_LABELS[interest].toLowerCase()}`,
+    );
   }
 
   return { event, score, reasons };

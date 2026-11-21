@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { EventPatch, type EventView } from "@/contracts";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_LABELS, EventPatch, type EventView } from "@/contracts";
 import { requestJson } from "./api-client";
 import { FieldError } from "./field-error";
 import { localInputToUtcIso, utcIsoToLocalInput } from "./event-form";
@@ -13,10 +13,11 @@ import { NFT_RELEVANT_FIELDS, hasMintedTickets } from "./publish-rules";
  *
  * Once tickets are minted, the fields written into NFT metadata are frozen and
  * rendered read-only with an explanation. The server enforces the same rule, so
- * a request that bypasses this form is still rejected.
+ * a request that bypasses this form is still rejected. The category isn't in the
+ * metadata, so it stays editable.
  */
 
-type Field = "title" | "description" | "startsAt" | "endsAt" | "venue" | "city" | "artworkUrl";
+type Field = "title" | "description" | "startsAt" | "endsAt" | "venue" | "city" | "artworkUrl" | "category";
 type FieldErrors = Partial<Record<Field, string>>;
 
 const LOCKABLE = new Set<string>(NFT_RELEVANT_FIELDS);
@@ -74,6 +75,8 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
       candidate.city = String(formData.get("city") ?? "");
       candidate.artworkUrl = String(formData.get("artworkUrl") ?? "");
     }
+    // Never locked: "No category" submits an empty value, stored as null.
+    candidate.category = String(formData.get("category") ?? "") || null;
 
     const parsed = EventPatch.safeParse(candidate);
     if (!parsed.success) {
@@ -146,7 +149,7 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
           Tickets for this event are already on the ledger. Each one carries the event
           name, description, times, venue, city and artwork in its own metadata, which
           cannot be rewritten — so these details are now fixed. To change them you would
-          need a new event.
+          need a new event. The category isn&apos;t part of the tickets, so you can still change it.
         </p>
       ) : null}
 
@@ -266,6 +269,27 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
         </div>
 
         <div>
+          <label htmlFor={fieldId("category")} className={labelClass}>
+            Category
+          </label>
+          <select
+            id={fieldId("category")}
+            name="category"
+            defaultValue={event.category ?? ""}
+            className={inputClass}
+            {...errorProps("category")}
+          >
+            <option value="">No category</option>
+            {EVENT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {EVENT_CATEGORY_LABELS[category]}
+              </option>
+            ))}
+          </select>
+          <FieldError id={errorId("category")} message={fieldErrors.category} />
+        </div>
+
+        <div>
           <label htmlFor={fieldId("artworkUrl")} className={labelClass}>
             Artwork URL
           </label>
@@ -284,19 +308,16 @@ export function EventDetailsForm({ event: initialEvent }: { event: EventView }) 
         </div>
       </div>
 
-      {/* Every editable field is frozen once minting starts, so there is
-          nothing left to submit and the button would be a dead control. */}
-      {minted ? null : (
-        <div className="mt-6 border-t border-border pt-5">
-          <button
-            type="submit"
-            disabled={pending}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-60"
-          >
-            {pending ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      )}
+      {/* Shown even once minting starts: the category is still editable then. */}
+      <div className="mt-6 border-t border-border pt-5">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-60"
+        >
+          {pending ? "Saving…" : minted ? "Save category" : "Save changes"}
+        </button>
+      </div>
     </form>
   );
 }

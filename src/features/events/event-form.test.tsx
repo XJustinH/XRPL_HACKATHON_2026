@@ -63,6 +63,21 @@ describe("EventForm", () => {
     expect(router.push).toHaveBeenCalledWith("/seller/events");
   });
 
+  it("sends the chosen category, or null for No category", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<EventForm />);
+    await fillRequired(user);
+    await user.selectOptions(screen.getByLabelText("Category"), "FOOD");
+    await user.click(submit());
+    expect(postJson.mock.calls[0]![1]).toMatchObject({ category: "FOOD" });
+    unmount();
+
+    render(<EventForm />);
+    await fillRequired(user);
+    await user.click(submit());
+    expect(postJson.mock.calls[1]![1]).toMatchObject({ category: null });
+  });
+
   it("blocks submission and reports every missing required field", async () => {
     const user = userEvent.setup();
     render(<EventForm />);

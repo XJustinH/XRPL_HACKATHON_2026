@@ -57,6 +57,53 @@ export const TicketTierPatch = TicketTierInput.partial();
 export type TicketTierPatch = z.infer<typeof TicketTierPatch>;
 
 /* ------------------------------------------------------------------ *
+ * Event categories (XRPL-015, XRPL-058)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Event categories, used both as a customer's declared interests (XRPL-058)
+ * and as an event's own category (`Event.category`, XRPL-015), so the two match.
+ *
+ * A fixed vocabulary rather than free text, so a stated interest can actually
+ * be matched against events later (XRPL-059, XRPL-089). Adding a value is
+ * safe; renaming or removing one orphans existing selections, so the tolerant
+ * reader in `profile-settings` drops values it does not recognise.
+ */
+export const EVENT_CATEGORIES = [
+  "MUSIC",
+  "CLUB",
+  "COMEDY",
+  "THEATRE",
+  "FILM",
+  "ARTS",
+  "SPORT",
+  "FOOD",
+  "COMMUNITY",
+  "TALKS",
+  "FAMILY",
+  "OTHER",
+] as const;
+
+export const EventCategory = z.enum(EVENT_CATEGORIES);
+export type EventCategory = z.infer<typeof EventCategory>;
+
+/** Display labels. Stored values stay stable even if wording changes. */
+export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
+  MUSIC: "Live music",
+  CLUB: "Club nights",
+  COMEDY: "Comedy",
+  THEATRE: "Theatre",
+  FILM: "Film",
+  ARTS: "Arts & exhibitions",
+  SPORT: "Sport",
+  FOOD: "Food & drink",
+  COMMUNITY: "Community",
+  TALKS: "Talks & workshops",
+  FAMILY: "Family",
+  OTHER: "Something else",
+};
+
+/* ------------------------------------------------------------------ *
  * Events (XRPL-015, XRPL-017)
  * ------------------------------------------------------------------ */
 
@@ -68,6 +115,11 @@ export const EventDraftInput = z.object({
   venue: z.string().trim().min(1, "Venue is required").max(160),
   city: z.string().trim().min(1, "City is required").max(80),
   artworkUrl: OptionalHttpUrl.optional(),
+  /**
+   * Optional, from the fixed vocabulary; null clears it. It isn't written into the ticket NFTs'
+   * metadata, so it stays editable after minting. No default, so a patch without it leaves it alone.
+   */
+  category: EventCategory.nullable().optional(),
 });
 export type EventDraftInput = z.infer<typeof EventDraftInput>;
 
@@ -112,6 +164,8 @@ export type EventView = {
   city: string;
   status: EventStatus;
   artworkUrl: string | null;
+  /** The seller's chosen category, or null when none is set. */
+  category: EventCategory | null;
   tiers: TicketTierView[];
   publishedAt: IsoDateTime | null;
 };
@@ -246,13 +300,10 @@ export type EventSort = z.infer<typeof EventSort>;
 /**
  * Filters for the public event search (XRPL-059).
  *
- * Every field here is actually applied. Two filters named in the backlog are
- * deliberately absent rather than accepted and ignored:
- *
- *  - **category** needs an `Event.category` column, which does not exist yet.
- *  - **maxPriceDrops** needs a numeric comparison, but `priceDrops` is stored
- *    as a decimal string for precision, where `"9" > "10"` lexicographically.
- *    It needs an indexed numeric column or a raw query to be correct.
+ * Every field here is actually applied. `category` matches `Event.category` exactly.
+ * **maxPriceDrops** is deliberately absent rather than accepted and ignored: it isn't
+ * wired yet, though `TicketTier.priceDropsNumeric` now makes a correct numeric filter
+ * possible (compared as strings, `"9" > "10"`).
  *
  * `sort` is limited to SOONEST because the cursor is a keyset over
  * (startsAt, id); other orderings need their own cursor and arrive with the
@@ -265,6 +316,7 @@ export const EventQuery = z.object({
   from: IsoDateTime.optional(),
   to: IsoDateTime.optional(),
   sellerId: AppId.optional(),
+  category: EventCategory.optional(),
   cursor: z.string().min(1).max(512).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(12),
 });
@@ -282,49 +334,6 @@ export type SocialLink = z.infer<typeof SocialLink>;
 
 export const ProfileVisibility = z.enum(["PUBLIC", "PRIVATE"]);
 export type ProfileVisibility = z.infer<typeof ProfileVisibility>;
-
-/**
- * Event categories, used both as a customer's declared interests (XRPL-058)
- * and, once the column exists, as an event's own category (XRPL-015).
- *
- * A fixed vocabulary rather than free text, so a stated interest can actually
- * be matched against events later (XRPL-059, XRPL-089). Adding a value is
- * safe; renaming or removing one orphans existing selections, so the tolerant
- * reader in `profile-settings` drops values it does not recognise.
- */
-export const EVENT_CATEGORIES = [
-  "MUSIC",
-  "CLUB",
-  "COMEDY",
-  "THEATRE",
-  "FILM",
-  "ARTS",
-  "SPORT",
-  "FOOD",
-  "COMMUNITY",
-  "TALKS",
-  "FAMILY",
-  "OTHER",
-] as const;
-
-export const EventCategory = z.enum(EVENT_CATEGORIES);
-export type EventCategory = z.infer<typeof EventCategory>;
-
-/** Display labels. Stored values stay stable even if wording changes. */
-export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
-  MUSIC: "Live music",
-  CLUB: "Club nights",
-  COMEDY: "Comedy",
-  THEATRE: "Theatre",
-  FILM: "Film",
-  ARTS: "Arts & exhibitions",
-  SPORT: "Sport",
-  FOOD: "Food & drink",
-  COMMUNITY: "Community",
-  TALKS: "Talks & workshops",
-  FAMILY: "Family",
-  OTHER: "Something else",
-};
 
 export const SellerProfilePatch = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),

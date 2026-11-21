@@ -31,6 +31,7 @@ function event(overrides: Partial<EventView> = {}): EventView {
     city: "Dublin",
     status: "PUBLISHED",
     artworkUrl: null,
+    category: null,
     tiers: [tier()],
     publishedAt: "2026-11-20T10:00:00.000Z",
     ...overrides,

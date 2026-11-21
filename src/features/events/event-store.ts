@@ -1,12 +1,13 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import type {
-  EventDraftInput,
-  EventPatch,
-  EventView,
-  Page,
-  TicketTierInput,
-  TicketTierPatch,
-  TicketTierView,
+import {
+  EventCategory,
+  type EventDraftInput,
+  type EventPatch,
+  type EventView,
+  type Page,
+  type TicketTierInput,
+  type TicketTierPatch,
+  type TicketTierView,
 } from "@/contracts";
 import {
   describeLockedFields,
@@ -76,6 +77,8 @@ export function toEventView(row: EventRow): EventView {
     city: row.city,
     status: row.status,
     artworkUrl: row.artworkUrl,
+    // The database only checks the format, so a value outside the vocabulary reads as "none".
+    category: EventCategory.safeParse(row.category).data ?? null,
     tiers: row.tiers.map(toTierView),
     publishedAt: row.publishedAt?.toISOString() ?? null,
   };
@@ -103,6 +106,7 @@ export async function createEventDraft(
       venue: input.venue,
       city: input.city,
       artworkUrl: input.artworkUrl?.trim() ? input.artworkUrl : null,
+      category: input.category ?? null,
       status: "DRAFT",
     },
     include: eventInclude,
@@ -151,6 +155,8 @@ export type EventListOptions = {
   from?: string;
   to?: string;
   sellerId?: string;
+  /** Exact match on `Event.category` (XRPL-059). */
+  category?: EventCategory;
 };
 
 /**
@@ -172,6 +178,7 @@ function buildEventFilters(options: EventListOptions, now: Date): Prisma.EventWh
   if (options.city) where.city = { equals: options.city, mode: "insensitive" };
   if (options.venue) where.venue = { contains: options.venue, mode: "insensitive" };
   if (options.sellerId) where.sellerId = options.sellerId;
+  if (options.category) where.category = options.category;
 
   const from = options.from ? new Date(options.from) : null;
   const to = options.to ? new Date(options.to) : null;
@@ -308,6 +315,7 @@ export async function updateEvent(
       ...(patch.artworkUrl !== undefined
         ? { artworkUrl: patch.artworkUrl?.trim() ? patch.artworkUrl : null }
         : {}),
+      ...(patch.category !== undefined ? { category: patch.category } : {}),
     },
     include: eventInclude,
   });
