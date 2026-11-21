@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { XrplServiceError } from "@/lib/xrpl/errors";
+import type { HolderOfferDeps } from "@/lib/xrpl/offers/holder";
 import type { TicketSyncDeps } from "./ticket-sync";
 
 /**
@@ -63,6 +64,13 @@ const fakeLedger = {
     if (!tx) throw new XrplServiceError("NOT_VALIDATED", `Transaction ${hash} is not validated yet`);
     return tx;
   },
+  // Holder offers also check the wallet can cover one more owner reserve (Agent B, #176).
+  async getAccountInfo(address: string) {
+    return { address, exists: true, balanceDrops: "100000000", sequence: 1, ownerCount: 0, provenance: provenance() };
+  },
+  async getReserves() {
+    return { baseDrops: "1000000", incrementDrops: "200000" };
+  },
 };
 
 const db = (await import("@/lib/db/client")).getDb();
@@ -76,7 +84,7 @@ const deps = {
   }),
   ledger: () => fakeLedger,
   config: { network: "TESTNET", explorerUrl: "https://testnet.xrpl.org" },
-} as unknown as TicketSyncDeps;
+} as unknown as TicketSyncDeps & HolderOfferDeps;
 
 vi.mock("@/lib/xrpl/tickets/server", () => ({ mintingDeps: () => deps }));
 // Route handlers call connection() to opt out of prerendering; there is no request scope in tests.

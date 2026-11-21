@@ -13,56 +13,21 @@
  * comes from the inventory calculation (XRPL-020).
  */
 import { z } from "zod";
-import { AppId, Drops, IsoDateTime, NFTokenId, OfferIndex, TxHash, XrplAddress } from "./common";
+import {
+  AppId,
+  Drops,
+  HttpUrl,
+  IsoDateTime,
+  NFTokenId,
+  OfferIndex,
+  OptionalHttpUrl,
+  TxHash,
+  XrplAddress,
+} from "./common";
 import { EventStatus, OfferKind, OfferState } from "./entities";
 
-/* ------------------------------------------------------------------ *
- * User-supplied URLs
- * ------------------------------------------------------------------ */
-
-/** Schemes that are safe to put in an `href` or an `img src`. */
-const SAFE_URL_PROTOCOLS = new Set(["http:", "https:"]);
-
-/**
- * A user-supplied web address, restricted to http and https.
- *
- * `z.url()` alone is **not** sufficient here: it accepts `javascript:`,
- * `data:`, `vbscript:` and `file:` URLs, all of which are valid URLs and none
- * of which are safe to render into an anchor on a public page. A seller's
- * profile link is attacker-controlled content as far as a visitor is concerned.
- *
- * Worth promoting to `./common` if another slice takes user-supplied URLs.
- */
-export const HttpUrl = z
-  .url("Enter a valid web address")
-  .refine((value) => {
-    try {
-      return SAFE_URL_PROTOCOLS.has(new URL(value).protocol);
-    } catch {
-      return false;
-    }
-  }, "Links must start with http:// or https://");
-export type HttpUrl = z.infer<typeof HttpUrl>;
-
-/** `HttpUrl`, or an empty string meaning "cleared". */
-export const OptionalHttpUrl = z.union([HttpUrl, z.literal("")]);
-
-/**
- * Returns a URL only when it is safe to render, otherwise null.
- *
- * Validation on write is the main defence; this is the second one, for values
- * that were stored before the rule existed or written by something other than
- * these forms. Rendering code should never pass a stored URL straight to an
- * `href`.
- */
-export function safeExternalUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    return SAFE_URL_PROTOCOLS.has(new URL(value).protocol) ? value : null;
-  } catch {
-    return null;
-  }
-}
+/** Moved to `./common` for every slice that takes a user-supplied URL; re-exported so imports from this slice keep working. */
+export { HttpUrl, OptionalHttpUrl, safeExternalUrl } from "./common";
 
 /* ------------------------------------------------------------------ *
  * Ticket tiers (XRPL-016)
