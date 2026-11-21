@@ -30,15 +30,21 @@
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-  --radius-card: 0.875rem;
+  --radius-card: 1rem;
+
+  /* Depth: a resting card, and one that is hovered or lifted. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.45);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.35), 0 18px 40px -16px rgb(0 0 0 / 0.7);
+  /* Second brand colour, for gradients and decoration only: never for text or controls. */
+  --color-glow: #a78bfa;
 }
 
 @media (prefers-color-scheme: dark) {
   @theme {
-    --color-canvas: #0c0e13;
-    --color-surface: #14171f;
-    --color-surface-raised: #1b1f29;
-    --color-border: #2b303c;
+    --color-canvas: #0a0c12;
+    --color-surface: #12151e;
+    --color-surface-raised: #191d29;
+    --color-border: #2a3040;
     --color-ink: #f2f4f8;
     --color-muted: #a2abbb;
     --color-accent: #7aa2ff;
@@ -66,10 +72,49 @@ html {
 
 body {
   background-color: var(--color-canvas);
+  /* Two faint glows behind the top of the page, so the canvas is not one flat colour. */
+  background-image:
+    radial-gradient(60rem 28rem at 12% -8rem, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%),
+    radial-gradient(48rem 24rem at 92% -6rem, color-mix(in srgb, var(--color-glow) 10%, transparent), transparent 70%);
+  background-repeat: no-repeat;
   color: var(--color-ink);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   /* Prevents the shell from ever scrolling sideways on narrow screens. */
   overflow-x: hidden;
+}
+
+/*
+ * Every card in the app is built from the same utility, `rounded-card`, so depth is added here
+ * once. Dashed cards are empty states: they stay flat.
+ */
+.rounded-card:not(.border-dashed) {
+  box-shadow: var(--shadow-card);
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* Links and buttons change state smoothly; reduced-motion users get none of it (below). */
+a,
+button {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+button:not(:disabled):active,
+a[class*="bg-accent"]:active {
+  transform: translateY(1px);
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
 /* Visible keyboard focus everywhere, including inside composed widgets. */

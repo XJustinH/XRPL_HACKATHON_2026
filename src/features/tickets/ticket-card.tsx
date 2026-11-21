@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { safeExternalUrl, type TicketView } from "@/contracts";
+import { ArtworkPlaceholder } from "@/components/ui/artwork-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { formatEventDate, isPastEvent } from "@/features/events/event-formatting";
 
@@ -22,7 +23,7 @@ export function TicketCard({ ticket }: { ticket: TicketView }) {
      * link's outline is switched off (`!`, because the global `:focus-visible` rule is unlayered
      * and would otherwise win).
      */
-    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition-colors hover:border-accent has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-accent">
+    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lift has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-accent">
       <Link href={`/tickets/${ticket.id}`} className="block focus-visible:outline-none!">
         <div className="aspect-[16/9] w-full overflow-hidden bg-surface">
           {artworkUrl ? (
@@ -34,12 +35,7 @@ export function TicketCard({ ticket }: { ticket: TicketView }) {
               className="size-full object-cover"
             />
           ) : (
-            <div
-              aria-hidden="true"
-              className="grid size-full place-items-center text-2xl font-semibold text-muted"
-            >
-              {ticket.event.title.slice(0, 1).toUpperCase()}
-            </div>
+            <ArtworkPlaceholder name={ticket.event.title} />
           )}
         </div>
 
