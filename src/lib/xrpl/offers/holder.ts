@@ -8,7 +8,9 @@ import { toNFTOfferDto } from "@/lib/db/mappers";
 import { errors } from "@/lib/http/response";
 
 import { formatDropsAsXrp } from "../format";
-import { OFFER_MEMO_TYPE, type OfferDeps } from "./primary";
+import type { XrplQueryService } from "../query";
+import { syncOfferWithLedger } from "./ledger-check";
+import { OFFER_MEMO_TYPE, reconcileOfferCreation, UNSIGNABLE_AFTER_MS, type OfferDeps } from "./primary";
 
 /**
  * Offers made by a ticket's current holder (XRPL-036, 040, 041). The holder lists a ticket they own
@@ -44,8 +46,18 @@ export type ResalePriceCheck = (
 ) => { allowed: true } | { allowed: false; message: string };
 
 export interface HolderOfferDeps extends OfferDeps {
+  /** Balance and reserve reads too, for the reserve a new offer needs. */
+  ledger: () => Pick<
+    XrplQueryService,
+    "getValidatedTx" | "verifyOwner" | "getOffers" | "getAccountInfo" | "getReserves"
+  >;
   resalePrice?: ResalePriceCheck;
 }
+
+/** Room for the network fee on top of the reserve a new offer locks (a fee is ~12 drops). */
+const FEE_ALLOWANCE_DROPS = BigInt(1000);
+/** Offers settled per step (this ticket's before a new offer, the wallet's others before the reserve check). */
+const MAX_SETTLED_FOR_RESERVE = 10;
 
 const PURPOSES: Record<HolderOfferKind, TransactionPurpose> = {
   RESALE: "CREATE_RESALE_OFFER",
@@ -107,10 +119,17 @@ export async function requestHolderOffer(
   if (!holding.owns) {
     throw errors.conflict("Your connected wallet doesn't hold this ticket, so it can't offer it");
   }
+  // Settle earlier offers first: a declined, expired or vanished one no longer holds the ticket.
+  await settleEarlierOffers(deps, ticket.id);
+  await requireOfferReserve(deps, { ownerAddress: holder, ticketId: ticket.id });
 
   const offer = await deps.db.$transaction(async (tx) => {
     // One live offer per ticket: concurrent requests wait here, then see the first.
     await tx.$queryRaw`SELECT "id" FROM "TicketNFT" WHERE "id" = ${ticket.id}::uuid FOR UPDATE`;
+    // A check-in recorded since the check above (its insert waits on this lock) still counts.
+    if ((await tx.checkInRecord.count({ where: { ticketId: ticket.id } })) > 0) {
+      throw errors.conflict("This ticket has already been used to enter the event");
+    }
     const live = await tx.nFTOffer.findFirst({
       where: { ticketId: ticket.id, state: { in: [...LIVE_STATES] }, ownerAddress: holder },
       select: { state: true },
@@ -122,6 +141,11 @@ export async function requestHolderOffer(
           : "An offer for this ticket is already waiting for approval in Xaman",
       );
     }
+    // Offers by earlier holders can't be filled now that the NFT has moved on.
+    await tx.nFTOffer.updateMany({
+      where: { ticketId: ticket.id, state: "ACTIVE", ownerAddress: { not: holder } },
+      data: { state: "STALE", lastSyncedAt: new Date() },
+    });
     return tx.nFTOffer.create({
       data: {
         ticketId: ticket.id,
@@ -181,4 +205,84 @@ export async function requestHolderOffer(
   });
 
   return { offer: toNFTOfferDto(offer), request };
+}
+
+/**
+ * Brings the ticket's live offers up to date before a new one is made: offers awaiting approval are
+ * reconciled (a declined or expired one becomes FAILED), and ACTIVE ones are checked against the
+ * ledger (one taken, cancelled or left behind outside the app is closed). Best effort: an offer that
+ * can't be checked right now is left as it is, and still counts under the lock.
+ */
+async function settleEarlierOffers(deps: HolderOfferDeps, ticketId: string): Promise<void> {
+  const live = await deps.db.nFTOffer.findMany({
+    where: { ticketId, state: { in: [...LIVE_STATES] } },
+    orderBy: { createdAt: "asc" },
+    take: MAX_SETTLED_FOR_RESERVE,
+  });
+  for (const offer of live) {
+    try {
+      if (offer.state === "PENDING_SIGNATURE") await reconcileOfferCreation(deps, offer.id);
+      else await syncOfferWithLedger(deps, offer);
+    } catch (error) {
+      console.error(`[offers] could not settle offer ${offer.id} before a new one`, error);
+    }
+  }
+}
+
+/**
+ * An offer is a ledger object, so the holder's account must keep one more owner-reserve increment
+ * (0.2 XRP on Testnet) for it, plus the fee. Without it the ledger would reject the offer with
+ * tecINSUFFICIENT_RESERVE and still charge the fee. The wallet's other offers still awaiting approval
+ * will each need one too, once settled: a declined or expired one needs none, and a validated one is
+ * already in the account's OwnerCount. 409 when the wallet can't cover it.
+ */
+async function requireOfferReserve(
+  deps: HolderOfferDeps,
+  owner: { ownerAddress: string; ticketId: string },
+): Promise<void> {
+  const awaitingApproval = {
+    ownerAddress: owner.ownerAddress,
+    state: "PENDING_SIGNATURE" as const,
+    // This ticket's own offers fall to the one-live-offer rule instead.
+    ticketId: { not: owner.ticketId },
+    // Older requests can't be signed any more, and any that were are already in OwnerCount.
+    createdAt: { gt: new Date(Date.now() - UNSIGNABLE_AFTER_MS) },
+  };
+  const others = await deps.db.nFTOffer.findMany({
+    where: awaitingApproval,
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: MAX_SETTLED_FOR_RESERVE,
+  });
+  for (const { id } of others) {
+    try {
+      await reconcileOfferCreation(deps, id);
+    } catch (error) {
+      console.error(`[offers] could not reconcile offer ${id} before the reserve check`, error);
+    }
+  }
+
+  const ledger = deps.ledger();
+  const [account, reserves, awaiting] = await Promise.all([
+    ledger.getAccountInfo(owner.ownerAddress),
+    ledger.getReserves(),
+    deps.db.nFTOffer.count({ where: awaitingApproval }),
+  ]);
+  // The holder's account holds the NFT, so it exists; if the ledger says otherwise, let it decide.
+  if (!account.exists || account.balanceDrops === null) return;
+  const increment = BigInt(reserves.incrementDrops);
+  const locked = BigInt(reserves.baseDrops) + increment * BigInt(account.ownerCount ?? 0);
+  const balance = BigInt(account.balanceDrops);
+  const spendable = balance > locked ? balance - locked : BigInt(0);
+  const required = increment * BigInt(awaiting + 1) + FEE_ALLOWANCE_DROPS;
+  if (spendable < required) {
+    const others =
+      awaiting > 0
+        ? ` Your ${awaiting} other offer${awaiting === 1 ? "" : "s"} waiting for approval in Xaman will need it too.`
+        : "";
+    throw errors.conflict(
+      `Not enough XRP to make this offer: each offer holds ${formatDropsAsXrp(increment)} XRP of your wallet's reserve until it is accepted or cancelled, and this wallet has ${formatDropsAsXrp(spendable)} XRP spare.${others}`,
+      { requiredDrops: required.toString(), spendableDrops: spendable.toString() },
+    );
+  }
 }
