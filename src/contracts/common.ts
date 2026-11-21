@@ -55,6 +55,55 @@ export type TxHash = z.infer<typeof TxHash>;
 export const IsoDateTime = z.iso.datetime({ offset: true });
 export type IsoDateTime = z.infer<typeof IsoDateTime>;
 
+/* ------------------------------------------------------------------ *
+ * User-supplied URLs (XRPL-057)
+ * ------------------------------------------------------------------ */
+
+/** Schemes that are safe to put in an `href` or an `img src`. */
+const SAFE_URL_PROTOCOLS = new Set(["http:", "https:"]);
+
+/**
+ * A user-supplied web address, restricted to http and https.
+ *
+ * `z.url()` alone is **not** sufficient here: it accepts `javascript:`,
+ * `data:`, `vbscript:` and `file:` URLs, all of which are valid URLs and none
+ * of which are safe to render into an anchor on a public page. A seller's
+ * profile link is attacker-controlled content as far as a visitor is concerned.
+ *
+ * Use it for every user-supplied URL: profile and social links, artwork, uploads (XRPL-070/071),
+ * Spotify (XRPL-092). Moved here from `./events` (XRPL-057).
+ */
+export const HttpUrl = z
+  .url("Enter a valid web address")
+  .refine((value) => {
+    try {
+      return SAFE_URL_PROTOCOLS.has(new URL(value).protocol);
+    } catch {
+      return false;
+    }
+  }, "Links must start with http:// or https://");
+export type HttpUrl = z.infer<typeof HttpUrl>;
+
+/** `HttpUrl`, or an empty string meaning "cleared". */
+export const OptionalHttpUrl = z.union([HttpUrl, z.literal("")]);
+
+/**
+ * Returns a URL only when it is safe to render, otherwise null.
+ *
+ * Validation on write is the main defence; this is the second one, for values
+ * that were stored before the rule existed or written by something other than
+ * these forms. Rendering code should never pass a stored URL straight to an
+ * `href`.
+ */
+export function safeExternalUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return SAFE_URL_PROTOCOLS.has(new URL(value).protocol) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pagination
 // ---------------------------------------------------------------------------
