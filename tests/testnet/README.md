@@ -30,10 +30,17 @@ database as `npm run test:db` and wipes it, so don't run the two at the same tim
 | The holder checks in once, and a second check-in is rejected. The seller (no longer the owner) can't get a door code; an unapproved code is refused; another wallet can't approve the holder's code; the holder approves with a Xaman-style sign-in signed by their own Testnet key, which the app verifies; ownership is read from a validated ledger at the door; a repeat scan and a fresh code for the used ticket are refused; exactly one attendance record | Runs |
 | The organiser's figures match the real sale and entry: inventory (1 of 2 sold), analytics (1 XRP revenue, 1 checked in, nothing pending), and in-app resale still closed while a ticket is unsold | Runs |
 | Only someone who was checked in can review the event | Runs |
-| A **digital collectible** (`collectibles.testnet.test.ts`, XRPL-073 to XRPL-075). A seller mints one edition, lists it for sale and another wallet buys it, each recorded only from its validated transaction. The NFT carries the collectible taxon and the edition's metadata URI. The buyer's collection shows it after a ledger ownership check, the seller's doesn't, and no ticket record is created | Runs |
 
 The test waits for each validated ledger outcome by polling until it is final (`support/wait.ts`), never
 for a fixed time.
+
+## Digital collectibles
+
+`collectibles.testnet.test.ts` (XRPL-073 to XRPL-075) runs the collectible flow the same way. A seller mints
+one edition, lists it for sale and another wallet buys it, each recorded only from its validated transaction.
+It checks that the NFT carries the collectible taxon and the edition's metadata URI, that the buyer's
+collection shows it after a ledger ownership check and the seller's doesn't, and that no ticket record is
+created.
 
 ## What is real and what is simulated
 
