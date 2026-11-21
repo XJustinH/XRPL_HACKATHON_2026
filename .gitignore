@@ -28,3 +28,6 @@ next-env.d.ts
 # Playwright output (screenshots, traces, HTML report)
 /test-results/
 /playwright-report/
+
+# Uploaded collectible media (local-disk media storage, XRPL-071). Never committed.
+/storage/
