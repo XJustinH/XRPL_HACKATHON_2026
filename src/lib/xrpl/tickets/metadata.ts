@@ -10,7 +10,7 @@ import { XrplServiceError } from "../errors";
  *
  * - Transferable, so holders can resell or gift the ticket (XRPL-036/040/041).
  * - Not burnable by the issuer: a seller cannot destroy a ticket someone else holds.
- * - No transfer fee for now; royalties are a separate P2 spike (XRPL-094).
+ * - No transfer fee. What one would do, and what it would take, is in docs/xrpl/transfer-fees.md (XRPL-094).
  */
 export const TICKET_NFT_FLAGS = NFTokenMintFlags.tfTransferable;
 
