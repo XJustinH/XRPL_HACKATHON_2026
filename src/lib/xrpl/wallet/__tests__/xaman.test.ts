@@ -103,11 +103,25 @@ describe("XamanClient", () => {
     [403, "CONFIG_ERROR"],
     [404, "NOT_FOUND"],
     [400, "INVALID_INPUT"],
-    [429, "PROVIDER_UNAVAILABLE"],
+    [429, "PROVIDER_LIMIT_REACHED"],
     [502, "PROVIDER_UNAVAILABLE"],
   ] as const)("maps HTTP %i to %s", async (status, code) => {
     const { xaman } = client(() => json(status, { error: { reference: "x", code: status } }));
     expect((await caught(xaman.getPayload(UUID))).code).toBe(code);
+  });
+
+  it("recognises a used-up quota, which Xaman sends as HTTP 400 with its own code 429", async () => {
+    const limited = client(() =>
+      json(400, { error: { reference: "x", code: 429, message: "Max payloads of 73 exceeded" } }),
+    );
+    const error = await caught(limited.xaman.createPayload({ txjson: { TransactionType: "SignIn" } }));
+    expect(error.code).toBe("PROVIDER_LIMIT_REACHED");
+    // Trying again at once would only be refused again.
+    expect(error.retryable).toBe(false);
+
+    // Any other 400, including one with no readable body, is still a rejected request.
+    const malformed = client(() => new Response("not json", { status: 400 }));
+    expect((await caught(malformed.xaman.getPayload(UUID))).code).toBe("INVALID_INPUT");
   });
 
   it("treats network failures and malformed responses as a provider outage", async () => {

@@ -38,6 +38,9 @@ function messageFor(error: unknown): string {
   if (error instanceof ApiError && error.code === "SERVICE_UNAVAILABLE") {
     return "Wallet sign-in isn't available right now. Try again in a moment.";
   }
+  if (error instanceof ApiError && error.code === "RATE_LIMITED") {
+    return "The wallet service has reached its request limit for this app, so it can't send a request to Xaman right now. Wait a few minutes and try again. If it keeps happening, the app needs new Xaman credentials.";
+  }
   return "Something went wrong while talking to the wallet service. Try again.";
 }
 

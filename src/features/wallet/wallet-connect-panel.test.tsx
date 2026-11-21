@@ -200,6 +200,15 @@ describe("WalletConnectPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Wallet sign-in isn't available right now");
   });
 
+  it("says so when the wallet service has reached its request limit", async () => {
+    mockApi({
+      create: () => envelope({ error: { code: "RATE_LIMITED", message: "limit" }, requestId: "r" }, 429),
+    });
+    render(<WalletConnectPanel pollIntervalMs={5} />);
+    await userEvent.click(screen.getByRole("button", { name: "Connect with Xaman" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("reached its request limit");
+  });
+
   describe("server-side proof (XRPL-012)", () => {
     it("starts at /api/auth/challenge and proves the signed request before showing it as connected", async () => {
       const fetchMock = mockApi({});
