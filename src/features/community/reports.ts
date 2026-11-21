@@ -90,7 +90,8 @@ async function loadTargets(db: Db, refs: TargetRef[]): Promise<Map<string, Targe
       text: `${review.rating}/5${review.body ? `: ${review.body}` : ""}`,
       context: `Review of ${review.event.title}`,
       hidden: review.hiddenAt !== null,
-      ownerId: review.event.sellerId,
+      // Nobody owns a review of their own event: a seller must not be able to hide a critical one.
+      ownerId: null,
     });
   }
   for (const comment of comments) {
@@ -114,7 +115,7 @@ async function loadTargets(db: Db, refs: TargetRef[]): Promise<Map<string, Targe
   return targets;
 }
 
-/** Moderators always; a seller for content on their own post or event that someone else wrote. */
+/** Site moderators always; a seller only for other people's comments on their own posts. */
 function canResolve(actorId: string, target: Target | undefined): boolean {
   if (isModerator(actorId)) return true;
   return !!target && target.ownerId === actorId && target.author.id !== actorId;

@@ -7,6 +7,7 @@ import { getCurrentSession } from "@/lib/auth/current-session";
 import { getDb } from "@/lib/db/client";
 import { EventCard } from "@/features/events/event-card";
 import { SellerMerchSection } from "@/features/commerce/seller-merch-section";
+import { SellerPostsFeed } from "@/features/community/seller-posts-feed";
 import { organiserBrowseHref } from "@/features/discovery/browse-links";
 import { isFollowing } from "@/features/profiles/follows";
 import { FollowButton } from "@/features/profiles/follow-button";
@@ -196,6 +197,11 @@ export default async function SellerStorefrontPage({
           </ul>
         )}
       </section>
+
+      {/* Announcements and posts, with likes and comments (XRPL-080 to XRPL-082). */}
+      <div className="mt-10">
+        <SellerPostsFeed sellerId={id} viewer={session} />
+      </div>
 
       {/* Published physical merchandise (XRPL-065/066). Renders its own "Merchandise" section. */}
       <SellerMerchSection sellerId={profile.id} />

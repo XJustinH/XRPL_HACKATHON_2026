@@ -39,6 +39,10 @@ export const accountNav: NavItem[] = [
     requiresSession: true,
   },
   { href: "/following", label: "Following", requiresSession: true },
+  // Community (XRPL-080 to XRPL-083, XRPL-093). /moderation is also open to site moderators by URL.
+  { href: "/notifications", label: "Notifications", requiresSession: true },
+  { href: "/seller/posts", label: "Posts", roles: ["SELLER", "ORGANISER"], requiresSession: true },
+  { href: "/moderation", label: "Moderation", roles: ["SELLER", "ORGANISER"], requiresSession: true },
   // Physical merchandise (XRPL-065 to XRPL-069).
   { href: "/cart", label: "Cart", requiresSession: true },
   { href: "/orders", label: "Orders", requiresSession: true },

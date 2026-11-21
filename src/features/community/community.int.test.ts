@@ -144,17 +144,21 @@ describe("community on Postgres", () => {
     expect(await createReport(db, other.id, reviewReport)).toMatchObject({ id: report.id, alreadyReported: true });
     expect(await db.contentReport.count()).toBe(1);
 
-    // The reporter is not a moderator; the event's seller is, for reviews of their own event.
+    // Neither the reporter nor the event's seller can moderate a review: only a site moderator.
     expect(await code(resolveReport(db, other.id, report.id, { action: "HIDE" }))).toBe("403 FORBIDDEN");
+    expect(await code(resolveReport(db, seller.id, report.id, { action: "HIDE" }))).toBe("403 FORBIDDEN");
     expect(await listOpenReports(db, other.id)).toEqual([]);
-    expect((await listOpenReports(db, seller.id)).map((r) => r.id)).toEqual([report.id]);
-    await resolveReport(db, seller.id, report.id, { action: "HIDE" });
+    expect(await listOpenReports(db, seller.id)).toEqual([]);
+    process.env.MODERATOR_USER_IDS = moderator.id;
+    expect((await listOpenReports(db, moderator.id)).map((r) => r.id)).toEqual([report.id]);
+    await resolveReport(db, moderator.id, report.id, { action: "HIDE" });
+    process.env.MODERATOR_USER_IDS = "";
 
     expect((await reviews.listVisible(event.id, 50)).map((r) => r.id)).toEqual([kept.id]);
     expect(await reviews.stats(event.id)).toMatchObject({ count: 1, average: 5 });
     expect(await db.review.findUniqueOrThrow({ where: { id: review.id } })).toMatchObject({
       body: "Abuse", // kept on record, with who hid it and why
-      hiddenById: seller.id,
+      hiddenById: moderator.id,
       hiddenReason: "ABUSE",
     });
 

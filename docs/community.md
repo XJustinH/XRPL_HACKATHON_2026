@@ -86,7 +86,9 @@ There is no admin role in the schema, so:
 - **Site moderators** are the account ids listed in the server-only env var `MODERATOR_USER_IDS`
   (comma-separated `User.id` values). They can resolve any report and hide any comment.
 - **A seller** can hide, show again and remove comments on their own posts, and can resolve reports
-  about other people's comments on their posts and other people's reviews of their events.
+  about other people's comments on their posts.
+- **Reviews are moderated by site moderators only.** A seller can't hide a review of their own event,
+  so a critical review can't be removed by the person it criticises.
 - A seller cannot resolve a report about their own content (their own post, or a comment or review
   they wrote), and cannot show again a comment that a site moderator hid.
 
@@ -125,9 +127,8 @@ published after it are notified.
   only (no email or push).
 - Rate limits are a count followed by an insert, so two requests racing at the limit can both pass.
 - The blocked-word list is small and English-only.
-- Sellers moderate reviews of their own events, as specified. That lets a seller hide a critical
-  review; the hide is recorded (`hiddenById`, `hiddenReason`) but nobody reviews it. Restricting
-  review moderation to site moderators is a one-line change in `canResolve` (`reports.ts`).
+- Reports about reviews and posts wait for a site moderator. With no `MODERATOR_USER_IDS` set, nobody
+  can act on them.
 - There is no page to undo a hide on a review or a post; a comment can be shown again by whoever hid
   it or by a moderator.
 - Lists are capped rather than paginated: 20 posts on a seller's page, 100 comments per post, 50
