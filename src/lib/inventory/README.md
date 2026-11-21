@@ -40,3 +40,23 @@ new ResalePolicy({ inventory: createInventoryPort(), events, offers });
 Agent C's tier views (`soldQuantity`, `remaining` in `src/features/events/event-store.ts`) can read
 `getPrimaryAvailabilityMany` instead of their placeholder `0`. For a listing page, it takes all event
 IDs in one call.
+
+## Recording confirmed sales (XRPL-032)
+
+`reconcileLedgerTransaction(deps, hash)` in `sales.ts`, also exposed as
+**`POST /api/ledger/transactions/:hash/reconcile`** (signed-in callers), applies one **validated**
+transaction:
+
+- An `NFTokenAcceptOffer` that consumed one of the app's PRIMARY offers becomes a sale: the offer is
+  `ACCEPTED` (`acceptTxHash`, `acceptedByAddress` = the buyer from the validated tx), and the ticket gets
+  `primarySoldAt` (ledger close time), `primarySaleTxHash` and its cached owner. It works whether the buyer
+  used the app (Agent B's purchase flow, XRPL-031) or another wallet app.
+- **Exactly once.** The transaction is claimed in `LedgerTransaction` (unique `hash`, `appliedAt`). If the
+  buyer's in-app purchase attempt is still waiting for its hash, that row is used, so the in-app flow then
+  sees the sale as applied. Repeated or concurrent calls return `ALREADY_APPLIED` and change nothing.
+- Not validated yet → error `LEDGER_TX_NOT_VALIDATED` (409, retry later); nothing is recorded.
+- Other transaction types, offers the app didn't create, and resale, private or gift offers return
+  `NOT_APPLICABLE`. Ownership after those moves is XRPL-043.
+
+Remaining inventory and the sold-out state come from `primarySoldAt`, so they update as soon as a sale is
+recorded, with no separate counter to keep in step.

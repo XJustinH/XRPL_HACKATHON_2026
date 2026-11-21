@@ -280,6 +280,7 @@ async function applyPurchase(
         where: { id: offer.ticketId, primarySoldAt: null },
         data: {
           primarySoldAt: soldAt,
+          primarySaleTxHash: confirmed.hash,
           cachedOwnerAddress: holding.owns ? buyer : null,
           ownerSyncStatus: holding.owns ? "SYNCED" : "STALE",
           ownerSyncedAt: now,
