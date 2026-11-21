@@ -273,7 +273,7 @@ function ConnectedWalletCard({
       </div>
       <p className="mt-3 text-xs font-medium uppercase tracking-wide text-muted">Public address</p>
       <p className="mt-1 break-all font-mono text-sm">{wallet.address}</p>
-      <WalletReadinessSummary key={wallet.address} address={wallet.address} />
+      <WalletReadinessSummary key={`readiness-${wallet.address}`} address={wallet.address} />
       <div className="mt-5">
         <button type="button" onClick={onDisconnect} className={secondaryButton}>
           Disconnect
@@ -283,7 +283,7 @@ function ConnectedWalletCard({
         Disconnecting signs you out and forgets this wallet in this browser. Your wallet and funds are not affected.
       </p>
       {testTransactions ? (
-        <TestTransactionCheck key={wallet.address} address={wallet.address} pollIntervalMs={pollIntervalMs} />
+        <TestTransactionCheck key={`test-transactions-${wallet.address}`} address={wallet.address} pollIntervalMs={pollIntervalMs} />
       ) : null}
     </section>
   );
