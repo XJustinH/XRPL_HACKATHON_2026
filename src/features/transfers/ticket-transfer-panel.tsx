@@ -5,7 +5,7 @@ import { useId, useRef, useState } from "react";
 
 import { RESALE_LIMITATION_NOTICE } from "@/contracts/checkin";
 import { IDEMPOTENCY_KEY_HEADER } from "@/contracts/common";
-import type { OfferStatus, TicketOfferRequestResult, TransactionRequest } from "@/contracts/xrpl";
+import type { OfferCancelRequestResult, OfferStatus, TicketOfferRequestResult, TransactionRequest } from "@/contracts/xrpl";
 import { xrpToDrops } from "@/features/events/event-formatting";
 import { card, notice, primaryButton, secondaryButton } from "@/features/wallet/styles";
 import { TransactionApproval } from "@/features/wallet/transaction-approval";
@@ -22,6 +22,8 @@ export type OpenOffer = {
   state: "PENDING_SIGNATURE" | "ACTIVE";
   amountDrops: string;
   destinationAddress: string | null;
+  /** A cancellation of it is waiting for the holder's approval in Xaman (XRPL-042). */
+  cancelPending?: boolean;
 };
 
 const MODES: { kind: TransferKind; label: string; route: string }[] = [
@@ -31,18 +33,24 @@ const MODES: { kind: TransferKind; label: string; route: string }[] = [
 ];
 
 type State =
-  | { phase: "form" }
+  | { phase: "form"; notice?: string }
   | { phase: "confirmGift"; destination: string }
   | { phase: "requesting" }
   | { phase: "approving"; result: TicketOfferRequestResult }
   | { phase: "checking" }
-  | { phase: "open"; offer: OpenOffer }
+  | { phase: "open"; offer: OpenOffer; message?: string }
+  | { phase: "cancelling"; offer: OpenOffer }
+  | { phase: "approvingCancel"; offer: OpenOffer; request: TransactionRequest }
+  | { phase: "checkingCancel"; offer: OpenOffer }
+  | { phase: "closed"; message: string }
   | { phase: "error"; message: string };
 
 /**
  * The holder's ways to pass a ticket on (XRPL-036 resale, 040 private sale, 041 gift). Each creates an
  * NFT sell offer the holder approves in Xaman; nothing moves until the other side accepts it.
  * A gift asks for confirmation first, because once the recipient accepts it can't be undone.
+ * An open offer can be cancelled the same way (XRPL-042). It shows as cancelled only once the ledger
+ * validated that.
  */
 export function TicketTransferPanel({
   ticketId,
@@ -62,6 +70,7 @@ export function TicketTransferPanel({
   const [state, setState] = useState<State>(openOffer ? { phase: "open", offer: openOffer } : { phase: "form" });
   /** Key of a request that got no response, reused when the holder tries again. */
   const unanswered = useRef<string | null>(null);
+  const unansweredCancel = useRef<string | null>(null);
   const ids = useId();
 
   const mode = MODES.find((m) => m.kind === kind)!;
@@ -138,13 +147,83 @@ export function TicketTransferPanel({
     }
   };
 
+  const cancel = async (offer: OpenOffer) => {
+    const key = unansweredCancel.current ?? newIdempotencyKey();
+    setState({ phase: "cancelling", offer });
+    try {
+      const result = await callApi<OfferCancelRequestResult>(`/api/offers/${offer.id}/cancel-intent`, {
+        method: "POST",
+        headers: { "content-type": "application/json", [IDEMPOTENCY_KEY_HEADER]: key },
+        body: "{}",
+      });
+      unansweredCancel.current = null;
+      setState({ phase: "approvingCancel", offer, request: result.request });
+    } catch (error) {
+      unansweredCancel.current = error instanceof ApiError && !error.responded ? key : null;
+      setState({ phase: "open", offer, message: error instanceof Error ? error.message : "Could not cancel the offer." });
+    }
+  };
+
+  /** What the ledger says after the cancellation's approval finished, however it finished. */
+  const settleCancel = async (offer: OpenOffer, request: TransactionRequest) => {
+    setState({ phase: "checkingCancel", offer });
+    try {
+      const status = await callApi<OfferStatus>(`/api/offers/${offer.id}`);
+      switch (status.offer.state) {
+        case "CANCELLED":
+          setState({ phase: "form", notice: "Offer cancelled. The ticket is still yours, and you can offer it again." });
+          break;
+        case "ACTIVE":
+          setState({
+            phase: "open",
+            offer: { ...offer, cancelPending: false },
+            message:
+              request.status === "CONFIRMED"
+                ? "The XRP Ledger still shows the offer, so it's still open. Refresh in a moment."
+                : "The cancellation wasn't completed, so the offer is still open.",
+          });
+          break;
+        case "ACCEPTED":
+          setState({ phase: "closed", message: "The offer was accepted before it could be cancelled, so the ticket has moved." });
+          break;
+        default:
+          setState({ phase: "closed", message: "This offer is no longer open. Refresh to see the ticket's current owner." });
+      }
+    } catch (error) {
+      setState({ phase: "open", offer, message: error instanceof Error ? error.message : "Could not check the offer." });
+    }
+  };
+
   return (
     <section aria-labelledby={`${ids}-heading`} className={card}>
       <h2 id={`${ids}-heading`} className="text-lg font-semibold">
         Pass this ticket on
       </h2>
       {state.phase === "open" ? (
-        <OpenOfferView offer={state.offer} />
+        <OpenOfferView offer={state.offer} message={state.message} onCancel={() => void cancel(state.offer)} />
+      ) : state.phase === "approvingCancel" ? (
+        <div className="mt-3">
+          <TransactionApproval
+            key={state.request.id}
+            request={state.request}
+            title="Approve the cancellation in Xaman"
+            pollIntervalMs={pollIntervalMs}
+            onFinished={(request) => void settleCancel(state.offer, request)}
+          />
+        </div>
+      ) : state.phase === "cancelling" || state.phase === "checkingCancel" ? (
+        <p role="status" className="mt-3 text-sm text-muted">
+          {state.phase === "cancelling" ? "Preparing the cancellation…" : "Confirming the cancellation on the XRP Ledger…"}
+        </p>
+      ) : state.phase === "closed" ? (
+        <div className="mt-3 flex flex-col gap-2">
+          <p role="status" className={notice.caution}>
+            {state.message}
+          </p>
+          <Link href="/tickets" className="text-sm font-medium text-accent underline">
+            See my tickets
+          </Link>
+        </div>
       ) : state.phase === "approving" ? (
         <div className="mt-3">
           <TransactionApproval
@@ -200,6 +279,11 @@ export function TicketTransferPanel({
             ))}
           </div>
           <p className="text-sm text-muted">{describe(kind)}</p>
+          {state.phase === "form" && state.notice ? (
+            <p role="status" className={notice.positive}>
+              {state.notice}
+            </p>
+          ) : null}
 
           {needsRecipient ? (
             <div>
@@ -270,8 +354,8 @@ function approvalTitle(kind: string, amountDrops: string): string {
   return `Approve the offer in Xaman: ${formatDropsAsXrp(amountDrops)} XRP`;
 }
 
-/** An offer the holder already made: what it is, and the link to send the other person. */
-function OpenOfferView({ offer }: { offer: OpenOffer }) {
+/** An offer the holder already made: what it is, the link to send the other person, and cancelling it. */
+function OpenOfferView({ offer, message, onCancel }: { offer: OpenOffer; message?: string; onCancel: () => void }) {
   const path = `/offers/${offer.id}`;
   const [copied, setCopied] = useState(false);
   const price = `${formatDropsAsXrp(offer.amountDrops)} XRP`;
@@ -316,6 +400,27 @@ function OpenOfferView({ offer }: { offer: OpenOffer }) {
           {copied ? "Link copied" : "Copy link"}
         </button>
       </div>
+      {message ? (
+        <p role="alert" className={notice.caution}>
+          {message}
+        </p>
+      ) : null}
+      {offer.cancelPending ? (
+        <p className="text-sm text-muted">
+          A cancellation of this offer is waiting for your approval in Xaman. Approve or decline it there. It
+          expires after 10 minutes if you don&apos;t answer.
+        </p>
+      ) : (
+        <div className="border-t border-border pt-3">
+          <p className="text-sm text-muted">
+            Changed your mind? Cancel the offer to take it back. Until the cancellation is confirmed on the
+            ledger, it can still be accepted.
+          </p>
+          <button type="button" className={`${secondaryButton} mt-2`} onClick={onCancel}>
+            Cancel this offer
+          </button>
+        </div>
+      )}
     </div>
   );
 }

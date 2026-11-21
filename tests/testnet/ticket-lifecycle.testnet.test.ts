@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { createXrplQueryService } from "@/lib/xrpl";
+import { requestOfferCancellation } from "@/lib/xrpl/offers/cancel";
 import { requestHolderOffer } from "@/lib/xrpl/offers/holder";
 import { listPrimaryOffers, reconcilePrimaryOffer, requestPrimaryOffer, type OfferDeps } from "@/lib/xrpl/offers/primary";
 import { getOfferStatus, requestPurchase, type PurchaseDeps } from "@/lib/xrpl/offers/purchase";
@@ -355,6 +356,48 @@ describe("ticket lifecycle on XRPL Testnet (XRPL-050)", () => {
     expect(ticket.cachedOwnerAddress).toBe(buyer.classicAddress);
     expect(ticket.primarySoldAt).not.toBeNull();
   });
+  it("the holder lists the ticket for resale, then cancels the listing on the ledger (XRPL-036, 042)", async () => {
+    const listing = await requestHolderOffer(offerDeps, {
+      session: buyerSession(),
+      ticketId,
+      offer: { kind: "RESALE", amountDrops: "4000000" },
+    });
+    const listed = await waitFor(
+      () => getOfferStatus(purchaseDeps, listing.offer.id),
+      (s) => s.offer.state !== "PENDING_SIGNATURE",
+      { what: "the resale listing to reach a validated ledger" },
+    );
+    expect(listed.offer).toMatchObject({ state: "ACTIVE", kind: "RESALE", amountDrops: "4000000" });
+    const listingIndex = listed.offer.offerIndex as string;
+    expect((await ledger.getOffers(nftokenId)).sellOffers.map((o) => o.offerIndex)).toContain(listingIndex);
+
+    // The holder cancels it in their own wallet. Until that validates, the offer stays open.
+    const { request } = await requestOfferCancellation(offerDeps, { session: buyerSession(), offerId: listing.offer.id });
+    expect(request.purpose).toBe("CANCEL_OFFER");
+    expect(xaman.approved.at(-1)?.txjson).toMatchObject({
+      TransactionType: "NFTokenCancelOffer",
+      Account: buyer.classicAddress,
+      NFTokenOffers: [listingIndex],
+    });
+    const cancelled = await waitFor(
+      () => getOfferStatus(purchaseDeps, listing.offer.id),
+      (s) => s.offer.state !== "ACTIVE",
+      { what: "the cancellation to reach a validated ledger" },
+    );
+    expect(cancelled.offer).toMatchObject({ state: "CANCELLED", cancelTxHash: xaman.approved.at(-1)?.hash });
+
+    // Recorded from the validated ledger: the cancellation succeeded, the offer is gone, and the buyer
+    // still holds the ticket.
+    const tx = await ledger.getValidatedTx(cancelled.offer.cancelTxHash as string);
+    expect(tx).toMatchObject({ transactionType: "NFTokenCancelOffer", account: buyer.classicAddress, result: "tesSUCCESS" });
+    expect((await ledger.getOffers(nftokenId)).sellOffers.map((o) => o.offerIndex)).not.toContain(listingIndex);
+    expect((await ledger.verifyOwner(nftokenId, buyer.classicAddress)).owns).toBe(true);
+    const attempt = await db.ledgerTransaction.findFirstOrThrow({
+      where: { relatedOfferId: listing.offer.id, type: "NFTokenCancelOffer" },
+    });
+    expect(attempt).toMatchObject({ status: "VALIDATED_SUCCESS", hash: tx.hash });
+  });
+
   it("the current holder checks in once, and a second check-in is rejected (XRPL-044 to XRPL-047)", async () => {
     // The app's check-in service, with the real store, Agent B's live ledger reads and Agent A's blob check.
     const signIns = createWalletSignRequests(config, xaman);

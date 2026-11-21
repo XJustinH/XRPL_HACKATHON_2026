@@ -12,10 +12,10 @@ and routes live in `src/lib/xrpl/offers/holder.ts`; see `docs/xrpl/offers.md`.
 
 | File | Purpose |
 |---|---|
-| `ticket-transfer-panel.tsx` | Sell / Sell to a friend / Gift. A gift asks for confirmation first, because once accepted it can't be undone. Once the offer is live, shows the link to send |
+| `ticket-transfer-panel.tsx` | Sell / Sell to a friend / Gift. A gift asks for confirmation first, because once accepted it can't be undone. Once the offer is live, shows the link to send and **Cancel this offer** (XRPL-042), which says "cancelled" only once the ledger shows it |
 | `accept-offer.tsx` | Accept a gift or private sale, or buy a resale ticket. Success shows only once the ledger validated it |
 | `resale-listing-card.tsx` | One listing: ticket, price against face value, seller, when it was listed, and the offer's validated transaction on the explorer |
-| `server.ts` | The holder's open offer, what a visitor may see of an offer, and the resale listings |
+| `server.ts` | The holder's open offer, what a visitor may see of an offer, and the resale listings. Before an offer is shown, it settles what's in flight and re-checks the ledger, so one taken or cancelled elsewhere shows as closed |
 | `api.ts` | Fetch helper, idempotency keys and address formatting |
 
 Every step is approved in the user's own Xaman wallet with Agent B's `TransactionApproval`.
@@ -27,4 +27,5 @@ no longer active and offers for a ticket already used to enter the event. Those 
 Tests: `transfers.test.tsx` (components), `server.int.test.ts` (what each visitor may see, on Postgres) and the
 resale page in `tests/e2e/`.
 
-Limitation: an offer can't be cancelled from these screens yet (XRPL-042).
+Limitation: an offer closed outside the app stays on `/resale` until someone opens it or tries to buy it,
+when the ledger check closes it. See `docs/xrpl/offers.md`.
