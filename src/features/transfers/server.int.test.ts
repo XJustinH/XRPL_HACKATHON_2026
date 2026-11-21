@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RESALE_LIMITATION_NOTICE } from "@/contracts/checkin";
 import { getDb } from "@/lib/db/client";
@@ -59,6 +59,48 @@ async function seed(title: string, { supply = 1, sold = 1 } = {}) {
   return { seller, event, tickets };
 }
 
+const provenance = { endpoint: "wss://node", ledgerIndex: 3000, ledgerHash: null, validated: true, fetchedAt: "" };
+
+/**
+ * The ticket services' deps with a ledger that agrees with the app: every ACTIVE offer is live, and
+ * `world.holder` holds every NFT. `world.down` makes the ledger unreachable.
+ */
+function deps(world: { holder?: string; down?: boolean } = {}) {
+  const getOffers = async (nftokenId: string) => {
+    if (world.down) throw new Error("ledger unreachable");
+    const active = await db.nFTOffer.findMany({ where: { nftokenId, state: "ACTIVE" } });
+    return {
+      nftokenId,
+      buyOffers: [],
+      provenance,
+      sellOffers: active.map((o) => ({
+        offerIndex: o.offerIndex,
+        nftokenId,
+        side: "SELL",
+        owner: o.ownerAddress,
+        amountDrops: o.amountDrops,
+        amountIssued: null,
+        destination: o.destinationAddress,
+        expiresAt: null,
+        flags: 1,
+      })),
+    };
+  };
+  const verifyOwner = async (nftokenId: string, address: string) => ({
+    nftokenId,
+    address,
+    owns: address === (world.holder ?? HOLDER),
+    nft: null,
+    provenance,
+  });
+  return {
+    db,
+    transactions: () => ({ create: vi.fn(), get: vi.fn() }) as never,
+    ledger: () => ({ getValidatedTx: vi.fn(), getOffers, verifyOwner }) as never,
+    config: { network: "TESTNET", explorerUrl: "https://testnet.xrpl.org" } as never,
+  };
+}
+
 async function offer(
   ticket: { id: string; nftokenId: string | null },
   kind: "PRIMARY" | "RESALE" | "PRIVATE" | "GIFT",
@@ -86,9 +128,9 @@ describe("getOfferPage", () => {
     const { tickets } = await seed("Gig");
     const gift = await offer(tickets[0]!, "GIFT");
 
-    expect(await getOfferPage(db, gift.id, null)).toEqual({ status: "NOT_FOR_YOU" });
-    expect(await getOfferPage(db, gift.id, STRANGER)).toEqual({ status: "NOT_FOR_YOU" });
-    expect(await getOfferPage(db, gift.id, FRIEND)).toMatchObject({
+    expect(await getOfferPage(deps(), gift.id, null)).toEqual({ status: "NOT_FOR_YOU" });
+    expect(await getOfferPage(deps(), gift.id, STRANGER)).toEqual({ status: "NOT_FOR_YOU" });
+    expect(await getOfferPage(deps(), gift.id, FRIEND)).toMatchObject({
       status: "OPEN",
       offer: { kind: "GIFT", amountDrops: "0", sellerAddress: HOLDER, used: false, ticket: { tierName: "GA" }, event: { title: "Gig" } },
     });
@@ -101,18 +143,29 @@ describe("getOfferPage", () => {
       data: { ticketId: tickets[0]!.id, eventId: event.id, organiserId: seller.id, walletAddress: HOLDER },
     });
 
-    expect(await getOfferPage(db, sale.id, FRIEND)).toMatchObject({ status: "CLOSED", offer: { used: true } });
+    expect(await getOfferPage(deps(), sale.id, FRIEND)).toMatchObject({ status: "CLOSED", offer: { used: true } });
   });
 
   it("shows a resale offer to anyone only while the resale rule lists it", async () => {
     const soldOut = await seed("Sold out");
     const listed = await offer(soldOut.tickets[0]!, "RESALE");
-    expect(await getOfferPage(db, listed.id, null)).toMatchObject({ status: "OPEN", offer: { kind: "RESALE" } });
+    expect(await getOfferPage(deps(), listed.id, null)).toMatchObject({ status: "OPEN", offer: { kind: "RESALE" } });
 
     // Primary tickets still on sale: resale isn't open in the app, so the offer isn't shown at all.
     const onSale = await seed("On sale", { supply: 2, sold: 1 });
     const early = await offer(onSale.tickets[0]!, "RESALE");
-    expect(await getOfferPage(db, early.id, STRANGER)).toEqual({ status: "NOT_FOUND" });
+    expect(await getOfferPage(deps(), early.id, STRANGER)).toEqual({ status: "NOT_FOUND" });
+  });
+
+  it("closes an offer the ledger no longer backs, and shows it as recorded while the ledger is down", async () => {
+    const { tickets } = await seed("Gig");
+    const gift = await offer(tickets[0]!, "GIFT");
+
+    expect(await getOfferPage(deps({ down: true }), gift.id, FRIEND)).toMatchObject({ status: "OPEN" });
+    expect(await getOfferPage(deps({ holder: STRANGER }), gift.id, FRIEND)).toMatchObject({
+      status: "CLOSED",
+      offer: { state: "STALE" },
+    });
   });
 
   it("never shows primary offers or unknown ids here, and closes accepted offers", async () => {
@@ -120,26 +173,42 @@ describe("getOfferPage", () => {
     const primary = await offer(tickets[1]!, "PRIMARY");
     const accepted = await offer(tickets[0]!, "GIFT", "ACCEPTED");
 
-    expect(await getOfferPage(db, primary.id, null)).toEqual({ status: "NOT_FOUND" });
-    expect(await getOfferPage(db, "00000000-0000-4000-8000-000000000000", null)).toEqual({ status: "NOT_FOUND" });
-    expect(await getOfferPage(db, accepted.id, FRIEND)).toMatchObject({ status: "CLOSED", offer: { state: "ACCEPTED" } });
+    expect(await getOfferPage(deps(), primary.id, null)).toEqual({ status: "NOT_FOUND" });
+    expect(await getOfferPage(deps(), "00000000-0000-4000-8000-000000000000", null)).toEqual({ status: "NOT_FOUND" });
+    expect(await getOfferPage(deps(), accepted.id, FRIEND)).toMatchObject({ status: "CLOSED", offer: { state: "ACCEPTED" } });
   });
 });
 
 describe("getOpenOffer", () => {
   it("returns the holder's live offer, awaiting approval or active", async () => {
     const { tickets } = await seed("Gig");
-    expect(await getOpenOffer(db, tickets[0]!.id, HOLDER)).toBeNull();
+    expect(await getOpenOffer(deps(), tickets[0]!.id, HOLDER)).toBeNull();
 
     const pending = await offer(tickets[0]!, "GIFT", "PENDING_SIGNATURE");
-    expect(await getOpenOffer(db, tickets[0]!.id, HOLDER)).toEqual({
+    expect(await getOpenOffer(deps(), tickets[0]!.id, HOLDER)).toEqual({
       id: pending.id,
       kind: "GIFT",
       state: "PENDING_SIGNATURE",
       amountDrops: "0",
       destinationAddress: FRIEND,
+      cancelPending: false,
     });
-    expect(await getOpenOffer(db, tickets[0]!.id, STRANGER)).toBeNull();
+    expect(await getOpenOffer(deps(), tickets[0]!.id, STRANGER)).toBeNull();
+  });
+
+  it("drops an offer the ledger no longer backs, and says when a cancellation is waiting", async () => {
+    const { tickets } = await seed("Gig");
+    const listed = await offer(tickets[0]!, "RESALE");
+
+    await db.ledgerTransaction.create({
+      data: { type: "NFTokenCancelOffer", status: "PENDING", account: HOLDER, relatedOfferId: listed.id },
+    });
+    expect(await getOpenOffer(deps(), tickets[0]!.id, HOLDER)).toMatchObject({ id: listed.id, cancelPending: true });
+    await db.ledgerTransaction.deleteMany();
+
+    // Sold elsewhere: the holder's wallet no longer has the NFT, so the offer can't complete.
+    expect(await getOpenOffer(deps({ holder: STRANGER }), tickets[0]!.id, HOLDER)).toBeNull();
+    expect((await db.nFTOffer.findUniqueOrThrow({ where: { id: listed.id } })).state).toBe("STALE");
   });
 });
 

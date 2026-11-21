@@ -12,8 +12,8 @@ import { shortAddress } from "@/features/transfers/api";
 import { getOfferPage } from "@/features/transfers/server";
 import { card, notice } from "@/features/wallet/styles";
 import { getCurrentSession } from "@/lib/auth/current-session";
-import { getDb } from "@/lib/db/client";
 import { formatDropsAsXrp } from "@/lib/xrpl/format";
+import { mintingDeps } from "@/lib/xrpl/tickets/server";
 
 export const metadata = { title: "Ticket offer" };
 
@@ -29,7 +29,7 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
 
   const session = await getCurrentSession();
   const viewer = session?.walletAddress ?? null;
-  const page = await getOfferPage(getDb(), id.data, viewer);
+  const page = await getOfferPage(mintingDeps(), id.data, viewer);
   if (page.status === "NOT_FOUND") notFound();
 
   if (page.status === "NOT_FOR_YOU") {
@@ -93,12 +93,20 @@ export default async function OfferPage({ params }: { params: Promise<{ id: stri
         <p role="status" className={notice.caution}>
           {offer.state === "ACCEPTED"
             ? "This offer has been accepted, so the ticket has moved."
-            : offer.used
+            : offer.state === "CANCELLED"
+              ? "This offer was cancelled by the person who made it."
+              : offer.used
               ? "This ticket has already been used to enter the event, so it can't change hands."
               : "This offer is no longer open."}
         </p>
       ) : own ? (
-        <p className="text-sm text-muted">This is your own offer. Share this page&apos;s link with the person it&apos;s for.</p>
+        <p className="text-sm text-muted">
+          This is your own offer. Share this page&apos;s link with the person it&apos;s for, or{" "}
+          <Link href={`/tickets/${offer.ticket.id}`} className="font-medium text-accent underline">
+            cancel it from your ticket
+          </Link>
+          .
+        </p>
       ) : !viewer ? (
         <p className={notice.caution}>
           Connect your Xaman wallet to {isGift ? "accept this gift" : "buy this ticket"}.{" "}

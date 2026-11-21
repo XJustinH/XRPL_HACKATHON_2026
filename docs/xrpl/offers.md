@@ -67,7 +67,8 @@ Limitations:
 - Each live offer locks an owner reserve (0.2 XRP on Testnet today) in the seller's account until it is
   accepted or cancelled.
 - One approval per ticket, as for minting.
-- Primary offers have no expiry. Cancelling a listing is XRPL-042.
+- Primary offers have no expiry. The seller can cancel a listing through the API (see
+  [Cancelling an offer](#cancelling-an-offer-xrpl-042)). The organiser screens don't offer it yet.
 
 ## Buying a ticket (XRPL-031)
 
@@ -169,9 +170,9 @@ offer when it is read.
 **Limitations:**
 - A gift or private sale can't be reversed once accepted. The ticket page asks for confirmation before
   creating a gift.
-- Cancelling an open offer is XRPL-042.
-- Offers made by a previous holder stay recorded as they were until reconciliation (XRPL-043). The ledger
-  no longer lets anyone accept them once the NFT has moved.
+- An offer made by a previous holder stays recorded until it's next read, then closes as `STALE` (see
+  [Cancelling an offer](#cancelling-an-offer-xrpl-042)). Either way, the ledger no longer lets anyone accept
+  it once the NFT has moved.
 
 Verified on XRPL Testnet (21 Nov 2026) by the live lifecycle suite, with each transaction recorded
 `VALIDATED_SUCCESS` from the ledger:
@@ -185,3 +186,52 @@ Verified on XRPL Testnet (21 Nov 2026) by the live lifecycle suite, with each tr
   and accepted
   [`11D3DF8C…80252ABB`](https://testnet.xrpl.org/transactions/11D3DF8C85CF817989FC5B0CBD5858840F8916D647DB483B83AE49D680252ABB).
 
+## Cancelling an offer (XRPL-042)
+
+The wallet that made a sell offer withdraws it with an `NFTokenCancelOffer` signed in its own Xaman
+wallet. That covers a holder's resale listing, private sale or gift, and an organiser's primary listing.
+Code: `src/lib/xrpl/offers/cancel.ts`. On screen: **Cancel this offer** on the ticket page.
+
+1. **Request.** `POST /api/offers/:id/cancel-intent` with `{}` and an `Idempotency-Key` header.
+   - 201 `{ data: { offer, request } }`. The offer is still `ACTIVE`, and `request` is what the owner approves in
+     Xaman (purpose `CANCEL_OFFER`, `NFTokenOffers: [offerIndex]`, a memo `xrpl-ticketing/cancel` holding the
+     offer ID).
+   - 403 `WALLET_NOT_VERIFIED`.
+   - 404: an unknown offer, or one this wallet didn't make, so private sales and gifts stay private.
+   - 409: the offer is still awaiting its own approval, is no longer open, or a cancellation is already
+     waiting in Xaman. Also 409 when the offer is already gone from the ledger: it's then closed as `STALE`
+     and nothing is signed.
+2. **Recording.** `GET /api/offers/:id` settles the cancellation, along with creation and purchases.
+
+| Outcome | Offer state | `LedgerTransaction` |
+|---|---|---|
+| Validated `tesSUCCESS`, signed by the offer's owner, and the offer is gone from the ledger | `CANCELLED`, with `cancelTxHash` | `VALIDATED_SUCCESS` |
+| Validated, but the ledger still shows the offer | stays `ACTIVE` | `VALIDATED_SUCCESS` |
+| Declined, expired or never validated | stays `ACTIVE` | `DROPPED` |
+| Refused by the ledger (`tec`) | stays `ACTIVE` if the ledger still backs it, otherwise `STALE` | `VALIDATED_FAILURE` |
+
+Until the cancellation validates, someone can still accept the offer, and the ledger settles whichever comes
+first. An offer recorded `ACCEPTED` stays accepted. Once cancelled, the ticket can be offered again.
+
+**Stale-offer cleanup.** Before the ticket page or an offer page shows an open offer, the app settles what's
+in flight and re-checks the ledger (`syncOfferWithLedger` in `ledger-check.ts`):
+- An offer past its `expiresAt` becomes `EXPIRED`.
+- One that is gone or no longer matches becomes `STALE`. That covers an offer taken or cancelled outside the
+  app, or one whose seller no longer holds the NFT.
+- While a purchase or cancellation of it is in flight, it's left alone.
+
+Closed offers leave every active view: the ticket page, the offer page, `/resale` and the event page. Buying
+re-checks the ledger too. If the ledger can't be reached, the screens show the offer as last recorded.
+
+**Limitations:**
+- There's no background sweep. An offer closed outside the app stays listed on `/resale` until someone
+  opens it or tries to buy it.
+- Primary listings can be cancelled through the API only. The organiser screens don't show a cancel button
+  yet.
+
+Verified on XRPL Testnet (21 Nov 2026) by the live lifecycle suite. The buyer listed the ticket for resale
+[`B0D31042…74DC03BF`](https://testnet.xrpl.org/transactions/B0D310423A5FD0A5390152ADCDFED90CE1ACFFC9A0EF285C890E532974DC03BF)
+and cancelled it
+[`72C0A342…4CB40F83`](https://testnet.xrpl.org/transactions/72C0A342AB17DF5418A8DF51302E2AB0294B2EDE407B84C3B1EF4B950CB40F83)
+(`NFTokenCancelOffer`, `tesSUCCESS`). The app recorded `CANCELLED` only from that validated transaction, the
+offer was gone from the ledger, and the buyer still held the ticket.

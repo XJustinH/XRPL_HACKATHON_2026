@@ -147,6 +147,71 @@ describe("TicketTransferPanel", () => {
   });
 });
 
+describe("cancelling an open offer", () => {
+  const open = { id: OFFER, kind: "RESALE" as const, state: "ACTIVE" as const, amountDrops: "3000000", destinationAddress: null };
+
+  it("cancels after approval, and says so only once the ledger shows it", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "ACTIVE", "3000000", null), request }, 201))
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "CANCELLED", "3000000", null) }));
+    render(<TicketTransferPanel ticketId={TICKET} holderAddress={HOLDER} openOffer={open} />);
+
+    await user.click(screen.getByRole("button", { name: "Cancel this offer" }));
+    const sent = sentRequest();
+    expect(sent.url).toBe(`/api/offers/${OFFER}/cancel-intent`);
+    expect(sent.body).toEqual({});
+    expect(sent.headers["Idempotency-Key"]).toMatch(/^[0-9a-f]{32}$/);
+    expect(screen.queryByText(/Offer cancelled/)).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "Finish approval" }));
+    expect(await screen.findByText(/Offer cancelled. The ticket is still yours/)).toBeVisible();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/offers/${OFFER}`);
+    // The holder can offer it again straight away.
+    expect(screen.getByRole("button", { name: "List for sale" })).toBeVisible();
+  });
+
+  it("keeps the offer open when the cancellation isn't approved", async () => {
+    const user = userEvent.setup();
+    approvalOutcome.status = "REJECTED";
+    fetchMock
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "ACTIVE", "3000000", null), request }, 201))
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "ACTIVE", "3000000", null) }));
+    render(<TicketTransferPanel ticketId={TICKET} holderAddress={HOLDER} openOffer={open} />);
+
+    await user.click(screen.getByRole("button", { name: "Cancel this offer" }));
+    await user.click(await screen.findByRole("button", { name: "Finish approval" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("wasn't completed, so the offer is still open");
+    expect(screen.getByText(/Listed for resale at 3 XRP/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel this offer" })).toBeVisible();
+  });
+
+  it("says when the offer was accepted first", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "ACTIVE", "3000000", null), request }, 201))
+      .mockReturnValueOnce(json({ offer: offerDto("RESALE", "ACCEPTED", "3000000", null) }));
+    render(<TicketTransferPanel ticketId={TICKET} holderAddress={HOLDER} openOffer={open} />);
+
+    await user.click(screen.getByRole("button", { name: "Cancel this offer" }));
+    await user.click(await screen.findByRole("button", { name: "Finish approval" }));
+    expect(await screen.findByText(/accepted before it could be cancelled/)).toBeVisible();
+  });
+
+  it("shows the server's reason, and a cancellation already waiting in Xaman", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReturnValueOnce(json({ code: "CONFLICT", message: "This offer is no longer on the XRP Ledger" }, 409));
+    const { unmount } = render(<TicketTransferPanel ticketId={TICKET} holderAddress={HOLDER} openOffer={open} />);
+    await user.click(screen.getByRole("button", { name: "Cancel this offer" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no longer on the XRP Ledger");
+    unmount();
+
+    render(<TicketTransferPanel ticketId={TICKET} holderAddress={HOLDER} openOffer={{ ...open, cancelPending: true }} />);
+    expect(screen.getByText(/A cancellation of this offer is waiting for your approval in Xaman/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancel this offer" })).not.toBeInTheDocument();
+  });
+});
+
 describe("AcceptOffer", () => {
   it("accepts a gift and confirms the ticket arrived", async () => {
     const user = userEvent.setup();

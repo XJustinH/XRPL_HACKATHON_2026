@@ -12,6 +12,8 @@ import { explorerNftUrl, explorerTxUrl } from "../explorer";
 import { formatDropsAsXrp } from "../format";
 import type { XrplQueryService } from "../query";
 import { getWalletReadiness } from "../wallet/readiness";
+import { reconcileOfferCancellation } from "./cancel";
+import { isLiveOnLedger } from "./ledger-check";
 import { reconcileOfferCreation } from "./primary";
 import type { WalletTransactionRequests } from "../wallet/transaction-requests";
 
@@ -63,23 +65,6 @@ function truncate(text: string, max: number): string {
 }
 
 const STALE_MESSAGE = "This ticket was just sold or taken off sale. Pick another one.";
-
-/** Is the offer still live on the ledger and backed by the seller still holding the NFT? */
-async function isLiveOnLedger(deps: ReconcileDeps, offer: NFTOffer): Promise<boolean> {
-  if (!offer.offerIndex) return false;
-  const live = await deps.ledger().getOffers(offer.nftokenId);
-  const onLedger = live.sellOffers.find((o) => o.offerIndex === offer.offerIndex);
-  if (
-    !onLedger ||
-    onLedger.owner !== offer.ownerAddress ||
-    onLedger.amountDrops !== offer.amountDrops ||
-    // Same Destination as recorded: none for primary and resale, the recipient for private sales and gifts.
-    (onLedger.destination ?? null) !== (offer.destinationAddress ?? null)
-  ) {
-    return false;
-  }
-  return (await deps.ledger().verifyOwner(offer.nftokenId, offer.ownerAddress)).owns;
-}
 
 /**
  * Prepares the buyer's approval for an offer. 403 without a proven wallet · 404 unknown offer
@@ -389,7 +374,7 @@ async function ticketIdsOf(db: Pick<PrismaClient, "ticketNFT">, eventId: string)
 
 /**
  * An offer's state after reconciling it (`GET /api/offers/:id`): its creation while it awaits the
- * holder's approval, then any purchases in flight.
+ * holder's approval, then any purchases and cancellations (XRPL-042) in flight.
  */
 export async function getOfferStatus(
   deps: ReconcileDeps & { config: Pick<XrplConfig, "network" | "explorerUrl"> },
@@ -399,6 +384,7 @@ export async function getOfferStatus(
   if (!exists) throw errors.notFound("Offer not found");
   if (exists.state === "PENDING_SIGNATURE") await reconcileOfferCreation(deps, offerId);
   await reconcileOfferPurchases(deps, offerId);
+  await reconcileOfferCancellation(deps, offerId);
 
   const offer = await deps.db.nFTOffer.findUniqueOrThrow({
     where: { id: offerId },

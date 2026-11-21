@@ -32,6 +32,7 @@ const PURPOSE_TRANSACTION_TYPES: Record<TransactionPurpose, string> = {
   CREATE_PRIVATE_OFFER: "NFTokenCreateOffer",
   CREATE_GIFT_OFFER: "NFTokenCreateOffer",
   ACCEPT_TRANSFER_OFFER: "NFTokenAcceptOffer",
+  CANCEL_OFFER: "NFTokenCancelOffer",
 };
 
 const RequestMeta = z.object({

@@ -69,7 +69,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   const checkedIn = ticket.checkedInAt !== null;
   const past = isPastEvent(ticket.event.startsAt);
   const canAct = ticket.ownedByViewer && !checkedIn && !past && viewer !== null;
-  const openOffer = canAct ? await getOpenOffer(deps.db, ticket.id, viewer) : null;
+  const openOffer = canAct ? await getOpenOffer(deps, ticket.id, viewer) : null;
   const { ledger } = ticket;
 
   return (

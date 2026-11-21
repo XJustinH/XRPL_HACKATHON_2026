@@ -335,6 +335,8 @@ export const TransactionPurpose = z.enum([
   "CREATE_GIFT_OFFER",
   /** Buying a resale ticket, or accepting a private sale or gift (XRPL-039/040/041). */
   "ACCEPT_TRANSFER_OFFER",
+  /** The offer's owner withdrawing an open sell offer of any kind (XRPL-042). */
+  "CANCEL_OFFER",
 ]);
 export type TransactionPurpose = z.infer<typeof TransactionPurpose>;
 
@@ -592,6 +594,18 @@ export type PrimaryOfferRequestResult = z.infer<typeof PrimaryOfferRequestResult
  */
 export const TicketOfferRequestResult = PrimaryOfferRequestResult;
 export type TicketOfferRequestResult = PrimaryOfferRequestResult;
+
+/** Body of `POST /api/offers/:id/cancel-intent` (XRPL-042): empty; the owner is the session's proven wallet. */
+export const CancelOfferBody = z.object({}).strict();
+export type CancelOfferBody = z.infer<typeof CancelOfferBody>;
+
+/**
+ * Response of `POST /api/offers/:id/cancel-intent`: the offer (still ACTIVE) and the `NFTokenCancelOffer`
+ * request to approve in Xaman. The offer shows CANCELLED only once that transaction validated and the
+ * offer is gone from the ledger (`GET /api/offers/:id`).
+ */
+export const OfferCancelRequestResult = PrimaryOfferRequestResult;
+export type OfferCancelRequestResult = PrimaryOfferRequestResult;
 
 /**
  * A live primary sell offer a buyer can accept: Agent C's `OfferPort.PrimaryOffer` fields plus
