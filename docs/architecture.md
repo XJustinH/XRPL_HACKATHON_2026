@@ -73,6 +73,8 @@ Defined in [`prisma/schema.prisma`](../prisma/schema.prisma). Key invariants, en
 | One review per author per event, and per check-in (XRPL-079) | `Review @@unique([eventId, authorId])`, `Review.checkInRecordId` unique |
 | A review's check-in is an admission to the same event | trigger `Review_checkin_same_event` |
 | Review rating 1–5, body ≤ 2000 characters | CHECK `Review_rating_range`, `Review_body_length` |
+| A friend pair is stored once, lower ID first; the requester is one of the pair; `respondedAt` is set exactly when accepted (XRPL-084) | `FriendConnection @@unique([userLowId, userHighId])`, CHECK `FriendConnection_pair_order`, `FriendConnection_requester_in_pair`, `FriendConnection_responded_when_accepted` |
+| One block per direction, never of yourself | `UserBlock @@id([blockerId, blockedId])`, CHECK `UserBlock_not_self` |
 | "No category" is NULL, never an empty string (XRPL-015/059) | CHECK `Event_category_format` |
 
 Every timestamp is `timestamptz` (UTC). Every app ID is a UUID. Ledger identifiers (`NFTokenID`, offer index,

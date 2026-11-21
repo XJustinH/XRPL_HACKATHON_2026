@@ -302,3 +302,81 @@ describe("reviews (XRPL-079)", () => {
     expect(await db.review.count()).toBe(0);
   });
 });
+
+describe("friendships (XRPL-084)", () => {
+  // Either side of the digit/letter boundary. The friend service orders a pair by lowercase text
+  // ("9…" < "a…"), and Postgres must order the UUIDs the same way for the pair-order CHECK.
+  const LOW = "9fffffff-ffff-4fff-bfff-ffffffffffff";
+  const HIGH = "a0000000-0000-4000-8000-000000000000";
+
+  async function pair() {
+    const low = await db.user.create({ data: { id: LOW, displayName: "Aoife" } });
+    const high = await db.user.create({ data: { id: HIGH, displayName: "Brian" } });
+    return { low, high };
+  }
+
+  it("stores a pair once, lower ID first, whoever asked", async () => {
+    const { low, high } = await pair();
+    const request = await db.friendConnection.create({
+      data: { userLowId: low.id, userHighId: high.id, requestedById: high.id },
+    });
+    expect(request).toMatchObject({ status: "PENDING", respondedAt: null });
+
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: low.id } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+    await expect(
+      db.friendConnection.create({ data: { userLowId: high.id, userHighId: low.id, requestedById: low.id } }),
+    ).rejects.toThrow(/FriendConnection_pair_order/);
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: low.id, requestedById: low.id } }),
+    ).rejects.toThrow(/FriendConnection_pair_order/);
+  });
+
+  it("only lets one of the two people be the requester", async () => {
+    const { low, high } = await pair();
+    const other = await db.user.create({ data: { displayName: "Ciara" } });
+    await expect(
+      db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: other.id } }),
+    ).rejects.toThrow(/FriendConnection_requester_in_pair/);
+  });
+
+  it("records when a request was accepted, and only then", async () => {
+    const { low, high } = await pair();
+    const { id } = await db.friendConnection.create({
+      data: { userLowId: low.id, userHighId: high.id, requestedById: low.id },
+    });
+    await expect(db.friendConnection.update({ where: { id }, data: { status: "ACCEPTED" } })).rejects.toThrow(
+      /FriendConnection_responded_when_accepted/,
+    );
+    await expect(db.friendConnection.update({ where: { id }, data: { respondedAt: new Date() } })).rejects.toThrow(
+      /FriendConnection_responded_when_accepted/,
+    );
+    const accepted = await db.friendConnection.update({
+      where: { id },
+      data: { status: "ACCEPTED", respondedAt: new Date() },
+    });
+    expect(accepted.status).toBe("ACCEPTED");
+  });
+
+  it("allows one block per direction, never of yourself", async () => {
+    const { low, high } = await pair();
+    await db.userBlock.create({ data: { blockerId: low.id, blockedId: high.id } });
+    await expect(db.userBlock.create({ data: { blockerId: low.id, blockedId: high.id } })).rejects.toMatchObject({
+      code: "P2002",
+    });
+    await db.userBlock.create({ data: { blockerId: high.id, blockedId: low.id } });
+    await expect(db.userBlock.create({ data: { blockerId: low.id, blockedId: low.id } })).rejects.toThrow(
+      /UserBlock_not_self/,
+    );
+  });
+
+  it("removes a user's friendships and blocks with the user", async () => {
+    const { low, high } = await pair();
+    await db.friendConnection.create({ data: { userLowId: low.id, userHighId: high.id, requestedById: low.id } });
+    await db.userBlock.create({ data: { blockerId: high.id, blockedId: low.id } });
+    await db.user.delete({ where: { id: low.id } });
+    expect(await db.friendConnection.count()).toBe(0);
+    expect(await db.userBlock.count()).toBe(0);
+  });
+});

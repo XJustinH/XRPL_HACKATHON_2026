@@ -11,6 +11,7 @@
  *   events.ts    — Agent C   (events, tiers, ticket/resale views, discovery, profiles)
  *   xrpl.ts      — Agent B   (ledger results, ownership, sign requests, offers)
  *   checkin.ts   — Agent D   (challenge, proof, CheckInResult, resale eligibility)
+ *   friends.ts   — Agent D   (friend connections, blocks, friend-list visibility)
  *   commerce.ts  — Agent E
  *   community.ts — Agent E
  *
@@ -26,3 +27,4 @@ export * from "./xrpl";
 export * from "./checkin";
 export * from "./inventory";
 export * from "./commerce";
+export * from "./friends";
