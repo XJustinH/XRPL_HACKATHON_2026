@@ -94,6 +94,21 @@ describe("EventReviews", () => {
     expect(screen.queryByRole("button", { name: /review/ })).not.toBeInTheDocument();
   });
 
+  it("lets a signed-in viewer report someone else's review", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(json(200, { data: data({ status: "NOT_ATTENDED" }) }))
+      .mockResolvedValueOnce(json(201, { data: { id: "rep1", status: "OPEN", alreadyReported: false } }));
+    render(<EventReviews eventId={EVENT} />);
+    await user.click(await screen.findByRole("button", { name: "Report" }));
+    await user.selectOptions(screen.getByLabelText("Why are you reporting this?"), "ABUSE");
+    await user.click(screen.getByRole("button", { name: "Send report" }));
+    expect(await screen.findByText(/^Reported/)).toBeInTheDocument();
+    const [url, init] = fetchMock.mock.calls[1]!;
+    expect(url).toBe("/api/reports");
+    expect(JSON.parse(init.body)).toEqual({ targetType: "REVIEW", targetId: "r1", reason: "ABUSE", details: "" });
+  });
+
   it("shows the server's message when reviews are unavailable", async () => {
     fetchMock.mockResolvedValueOnce(json(503, { error: { code: "SERVICE_UNAVAILABLE", message: "Reviews aren't available yet." } }));
     render(<EventReviews eventId={EVENT} />);
