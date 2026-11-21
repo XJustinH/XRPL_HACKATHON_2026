@@ -40,6 +40,8 @@ export const accountNav: NavItem[] = [
     roles: ["SELLER", "ORGANISER"],
     requiresSession: true,
   },
+  // Storefront analytics (XRPL-078): tickets, merchandise orders and collectible sales, kept apart.
+  { href: "/seller/analytics", label: "Analytics", roles: ["SELLER", "ORGANISER"], requiresSession: true },
   { href: "/following", label: "Following", requiresSession: true },
   // Community (XRPL-080 to XRPL-083, XRPL-093). /moderation is also open to site moderators by URL.
   { href: "/notifications", label: "Notifications", requiresSession: true },
