@@ -1,13 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { XrplServiceError } from "@/lib/xrpl/errors";
-import type { SalesLedger } from "./sales";
+import type { LedgerTxReader } from "./transfers";
 
 /**
- * XRPL-032 against Postgres: recording validated primary sales exactly once, whether they come
- * from the app's purchase flow (Agent B) or another wallet, and the sold-out state that follows.
+ * XRPL-032 and XRPL-043 against Postgres: recording accepted offers (primary sales, resales, private
+ * sales and gifts) exactly once, whether they come from the app's purchase flow (Agent B) or another
+ * wallet, and the sold-out state that follows.
  */
 
-type Tx = Awaited<ReturnType<SalesLedger["getValidatedTx"]>>;
+type Tx = Awaited<ReturnType<LedgerTxReader["getValidatedTx"]>>;
 
 // A controllable ledger, also used by the route through a module mock.
 const ledger = vi.hoisted(() => {
@@ -25,7 +26,7 @@ const ledger = vi.hoisted(() => {
   };
 });
 
-const fakeLedger: SalesLedger = {
+const fakeLedger: LedgerTxReader = {
   async getValidatedTx(hash) {
     if (ledger.pending.has(hash)) throw new XrplServiceError("NOT_VALIDATED", "Transaction is not validated yet");
     const tx = ledger.txs.get(hash);
@@ -47,8 +48,8 @@ const { createSession, sessionCookieName } = await import("@/lib/auth/session");
 const { getDb } = await import("@/lib/db/client");
 const { ResalePolicy } = await import("@/lib/resale-policy/resale-policy");
 const { reconcilePurchase } = await import("@/lib/xrpl/offers/purchase");
-const { createInventoryPort, getPrimaryAvailability } = await import("./primary-inventory");
-const { reconcileLedgerTransaction } = await import("./sales");
+const { createInventoryPort, getPrimaryAvailability } = await import("@/lib/inventory/primary-inventory");
+const { reconcileLedgerTransaction } = await import("./transfers");
 
 const db = getDb();
 const deps = { db, ledger: () => fakeLedger };
@@ -193,7 +194,7 @@ describe("recording a validated primary sale", () => {
     expect((await getPrimaryAvailability(db, event.id)).sold).toBe(0);
   });
 
-  it("ignores transactions that aren't primary sales of this app's offers", async () => {
+  it("ignores transactions that didn't take one of the app's offers", async () => {
     const { offers } = await listedEvent(1);
     const mint = hex64();
     ledger.txs.set(mint, {
@@ -211,10 +212,6 @@ describe("recording a validated primary sale", () => {
       outcome: "NOT_APPLICABLE",
       reason: "UNKNOWN_OFFER",
     });
-
-    await db.nFTOffer.update({ where: { id: offers[0]!.id }, data: { kind: "RESALE" } });
-    const resale = acceptOnLedger(offers[0]!);
-    expect(await reconcileLedgerTransaction(deps, resale)).toEqual({ outcome: "NOT_APPLICABLE", reason: "NOT_PRIMARY" });
     expect(await db.ledgerTransaction.count()).toBe(0);
   });
 
@@ -241,6 +238,133 @@ describe("recording a validated primary sale", () => {
       ownerSyncStatus: "STALE",
     });
     expect(await getPrimaryAvailability(db, event.id)).toMatchObject({ sold: 1, isSoldOut: true });
+  });
+});
+
+describe("resales, private sales and gifts (XRPL-043)", () => {
+  const FRIEND = "rUn84CUYbNjRoTQ6mSW7BVJPSVJNLb1QLo";
+
+  /** A ticket BUYER bought on primary, now offered by BUYER as `kind`. */
+  async function heldTicketOffer(kind: "RESALE" | "PRIVATE" | "GIFT") {
+    const { event, offers } = await listedEvent(1);
+    const primary = offers[0]!;
+    await reconcileLedgerTransaction(deps, acceptOnLedger(primary));
+    const ticket = await db.ticketNFT.findUniqueOrThrow({ where: { id: primary.ticketId! } });
+    const offer = await db.nFTOffer.create({
+      data: {
+        ticketId: ticket.id,
+        nftokenId: ticket.nftokenId!,
+        offerIndex: hex64(),
+        kind,
+        state: "ACTIVE",
+        ownerAddress: BUYER,
+        amountDrops: kind === "GIFT" ? "0" : "30000000",
+        destinationAddress: kind === "RESALE" ? null : FRIEND,
+      },
+    });
+    return { event, ticket, offer };
+  }
+
+  it.each([
+    ["RESALE", "RESALE"],
+    ["PRIVATE", "PRIVATE_SALE"],
+    ["GIFT", "GIFT"],
+  ] as const)("records a %s accepted outside the app, leaving the primary sale as it was", async (kind, transfer) => {
+    const { event, ticket, offer } = await heldTicketOffer(kind);
+    const hash = acceptOnLedger(offer, FRIEND);
+
+    expect(await reconcileLedgerTransaction(deps, hash)).toEqual({
+      outcome: "APPLIED",
+      kind: transfer,
+      offerId: offer.id,
+      ticketId: ticket.id,
+      acceptedByAddress: FRIEND,
+    });
+    expect(await db.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } })).toMatchObject({
+      state: "ACCEPTED",
+      acceptTxHash: hash,
+      acceptedByAddress: FRIEND,
+    });
+    const after = await db.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(after).toMatchObject({ cachedOwnerAddress: FRIEND, ownerSyncStatus: "SYNCED" });
+    expect(after.primarySoldAt).toEqual(ticket.primarySoldAt);
+    expect(after.primarySaleTxHash).toBe(ticket.primarySaleTxHash);
+    expect(await getPrimaryAvailability(db, event.id)).toMatchObject({ sold: 1, remaining: 0 });
+
+    expect((await reconcileLedgerTransaction(deps, hash)).outcome).toBe("ALREADY_APPLIED");
+  });
+
+  it("refuses a private sale or gift that someone other than the recipient took", async () => {
+    const { offer } = await heldTicketOffer("GIFT");
+    const hash = acceptOnLedger(offer, "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
+    await expect(reconcileLedgerTransaction(deps, hash)).rejects.toMatchObject({ status: 409 });
+    expect(await db.ledgerTransaction.count({ where: { hash } })).toBe(0);
+  });
+
+  it("doesn't overwrite an owner read from a later ledger when a hash is reported late", async () => {
+    const { ticket, offer } = await heldTicketOffer("GIFT");
+    const hash = acceptOnLedger(offer, FRIEND); // validated in ledger 4242
+    const LATER_OWNER = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
+    await db.ticketNFT.update({
+      where: { id: ticket.id },
+      data: { cachedOwnerAddress: LATER_OWNER, ownerSyncStatus: "SYNCED", ownerSyncLedgerIndex: 5000 },
+    });
+    ledger.owners.set(offer.nftokenId, LATER_OWNER); // the friend has since passed it on
+
+    expect((await reconcileLedgerTransaction(deps, hash)).outcome).toBe("APPLIED");
+    expect(await db.nFTOffer.findUniqueOrThrow({ where: { id: offer.id } })).toMatchObject({ state: "ACCEPTED" });
+    expect(await db.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } })).toMatchObject({
+      cachedOwnerAddress: LATER_OWNER,
+      ownerSyncLedgerIndex: 5000,
+    });
+  });
+});
+
+describe("XRPL-043 with Agent B's in-app transfer flow", () => {
+  it("claims the recipient's in-app attempt, so the in-app flow then records nothing more", async () => {
+    const FRIEND = "rUn84CUYbNjRoTQ6mSW7BVJPSVJNLb1QLo";
+    const { offers } = await listedEvent(1);
+    await reconcileLedgerTransaction(deps, acceptOnLedger(offers[0]!));
+    const ticket = await db.ticketNFT.findUniqueOrThrow({ where: { id: offers[0]!.ticketId! } });
+    const gift = await db.nFTOffer.create({
+      data: {
+        ticketId: ticket.id,
+        nftokenId: ticket.nftokenId!,
+        offerIndex: hex64(),
+        kind: "GIFT",
+        state: "ACTIVE",
+        ownerAddress: BUYER,
+        amountDrops: "0",
+        destinationAddress: FRIEND,
+      },
+    });
+    const attempt = await db.ledgerTransaction.create({
+      data: {
+        type: "NFTokenAcceptOffer",
+        status: "PENDING",
+        account: FRIEND,
+        relatedOfferId: gift.id,
+        relatedTicketId: ticket.id,
+        signRequestRef: "7a2d2f3e-2b8a-4d6c-9a51-1f8f0d2b7c11",
+      },
+    });
+    const hash = acceptOnLedger(gift, FRIEND);
+
+    expect(await reconcileLedgerTransaction(deps, hash)).toMatchObject({ outcome: "APPLIED", kind: "GIFT" });
+    const claimed = await db.ledgerTransaction.findUniqueOrThrow({ where: { id: attempt.id } });
+    expect(claimed).toMatchObject({ hash, status: "VALIDATED_SUCCESS" });
+
+    const { reconcilePurchase } = await import("@/lib/xrpl/offers/purchase");
+    await reconcilePurchase(
+      {
+        db,
+        transactions: () => ({ create: async () => ({}) as never, get: async () => ({ status: "CONFIRMED", txHash: hash }) as never }),
+        ledger: () => ({ ...fakeLedger, getOffers: async () => ({ sellOffers: [], buyOffers: [] }) as never }) as never,
+      },
+      claimed,
+    );
+    expect(await db.ledgerTransaction.count({ where: { relatedOfferId: gift.id } })).toBe(1);
+    expect(await db.ticketNFT.findUniqueOrThrow({ where: { id: ticket.id } })).toMatchObject({ cachedOwnerAddress: FRIEND });
   });
 });
 

@@ -7,11 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { formatEventDate, isPastEvent } from "@/features/events/event-formatting";
+import { CheckLedgerButton } from "@/features/ownership/check-ledger-button";
+import { TicketHistorySection } from "@/features/ownership/ticket-history";
 import { shortAddress } from "@/features/transfers/api";
 import { getOpenOffer } from "@/features/transfers/server";
 import { TicketTransferPanel } from "@/features/transfers/ticket-transfer-panel";
 import { card } from "@/features/wallet/styles";
 import { getCurrentSession } from "@/lib/auth/current-session";
+import { getTicketHistory } from "@/lib/ownership/history";
 import { getTicketView } from "@/lib/xrpl/tickets/ownership";
 import { mintingDeps } from "@/lib/xrpl/tickets/server";
 
@@ -19,7 +22,8 @@ export const metadata = { title: "Ticket" };
 
 /**
  * One ticket with its ledger proof (XRPL-034), and the holder's actions: check in (XRPL-044) or pass
- * it on by resale, private sale or gift (XRPL-036/040/041).
+ * it on by resale, private sale or gift (XRPL-036/040/041). Below them, its transfer history, with
+ * moves outside the app marked as such, and a way to check the ledger again (XRPL-043).
  *
  * Ownership is read from a validated ledger on every load, never from the app's cache, so a ticket
  * that moved elsewhere shows its real owner. Only the wallet holding it sees the actions.
@@ -138,6 +142,9 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
           {session ? "Your connected wallet doesn't hold this ticket." : "Sign in with the wallet that holds this ticket to use it."}
         </p>
       )}
+
+      <TicketHistorySection history={await getTicketHistory(deps, ticket.id, view.ownership)} />
+      {session ? <CheckLedgerButton ticketId={ticket.id} /> : null}
     </div>
   );
 }
