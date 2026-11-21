@@ -63,9 +63,6 @@ test("a seller creates, prices and publishes an event, and visitors can then fin
   await signInAs(page, ARTIST);
   await createEventWithTier(page, eventTitle);
 
-  // Reload first: the publish panel only notices the new tier after a reload (known bug, see the
-  // next test). Remove this line once that is fixed.
-  await page.reload();
   await page.getByRole("button", { name: "Publish event" }).click();
   await expect(page.getByText("Published", { exact: true }).first()).toBeVisible();
 
@@ -74,13 +71,7 @@ test("a seller creates, prices and publishes an event, and visitors can then fin
 });
 
 test("publishing becomes possible as soon as a tier is added, without a reload", async ({ page }) => {
-  // Known bug: PublishPanel (src/features/events/publish-panel.tsx) copies its `event` prop into
-  // state once, so after a tier is added it keeps the old "add a ticket tier" blocker and the
-  // Publish button stays disabled until the page is reloaded. Playwright reports this test as
-  // passing while the bug exists. Once it is fixed the test passes for real and Playwright flags
-  // it: delete this test.fail line, and the reload in the test above.
-  test.fail(true, "Publish panel ignores tiers added after the page loaded");
-
+  // Regression check: the publish panel used to keep the "add a ticket tier" blocker until a reload.
   await signInAs(page, ARTIST);
   await createEventWithTier(page, `Publish refresh check ${Date.now()}`);
 

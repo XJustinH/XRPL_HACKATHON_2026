@@ -20,7 +20,7 @@ screenshots and traces as the `playwright-report` artifact (`npx playwright show
 | Customer | A customer account can't create events |
 | Seller | Sign in as the demo artist, create an event, add a tier, publish, then find it on the homepage |
 | Storefront | A seller's public page shows their published events and not their draft |
-| Known bug | Publishing should be possible right after adding a tier, without a reload (see below) |
+| Publish refresh | Publishing is possible right after adding a tier, without a reload |
 
 ## How they run
 
@@ -33,11 +33,3 @@ screenshots and traces as the `playwright-report` artifact (`npx playwright show
   tests. Renaming a label or button does: update the test with it.
 - Wallet steps (connecting Xaman, minting, buying) need a person approving on a phone and are not covered.
   The ledger side of those flows is checked by the live Testnet suite (`tests/testnet/`).
-
-## Known bug
-
-After a seller adds a tier, the publish panel keeps showing "Add at least one ticket tier", and **Publish
-event** stays disabled until the page is reloaded. `PublishPanel` (`src/features/events/publish-panel.tsx`)
-copies its `event` prop into state once and ignores the refreshed prop. The seller test reloads before
-publishing to work around it. The "Known bug" test is marked `test.fail`: once the bug is fixed it passes for
-real and Playwright reports it. Then remove the `test.fail` line and the reload.
