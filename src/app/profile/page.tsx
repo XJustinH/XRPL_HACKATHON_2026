@@ -11,6 +11,7 @@ import { getCustomerPreferences } from "@/features/profiles/customer-preferences
 import { getOwnCustomerProfile } from "@/features/profiles/customer-profile";
 import { Avatar, CustomerProfileForm } from "@/features/profiles/customer-profile-form";
 import { ActivitySummary, summariseUpcoming } from "@/features/profiles/activity-summary";
+import { SpotifyPanel } from "@/features/integrations/spotify/spotify-panel";
 import { listAttendedEvents } from "@/features/checkin/attendance-history";
 import { listTicketsForOwner } from "@/lib/xrpl/tickets/ownership";
 import { mintingDeps } from "@/lib/xrpl/tickets/server";
@@ -189,6 +190,9 @@ export default async function ProfilePage() {
           </p>
         )}
       </section>
+
+      {/* Optional Spotify listening status: connect, visibility and disconnect (XRPL-092). */}
+      <SpotifyPanel />
 
       <ActivitySummary hasWallet={!!session.walletAddress} upcoming={upcoming} attended={attended} />
     </>

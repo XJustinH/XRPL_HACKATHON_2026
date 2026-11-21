@@ -112,6 +112,7 @@ model User {
 
   wallets               WalletLink[]
   sessions              Session[]
+  spotifyConnection     SpotifyConnection?
   events                Event[]            @relation("EventSeller")
   checkInsScanned       CheckInRecord[]    @relation("CheckInOrganiser")
   offersCreated         NFTOffer[]         @relation("OfferCreatedBy")
@@ -213,6 +214,29 @@ model WalletLink {
   /// One address belongs to at most one app user per network.
   @@unique([network, address])
   @@index([userId])
+}
+
+/// A customer's optional Spotify connection (XRPL-092). At most one per user: created only when the
+/// user completes Spotify's consent screen, deleted on disconnect or when Spotify reports the access
+/// revoked. Both tokens are stored encrypted (AES-256-GCM, key derived from SESSION_SECRET) and never
+/// leave the server. Who may see the now-playing status is a preference in User.settings
+/// (`spotifyVisibility`, private by default).
+model SpotifyConnection {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @unique @db.Uuid
+  /// Spotify account ID and display name, shown to the owner only ("Connected as"). Not secrets.
+  spotifyUserId        String?
+  spotifyDisplayName   String?
+  /// Encrypted, never plaintext: "v1." + base64url(iv | auth tag | ciphertext).
+  accessTokenEnc       String
+  refreshTokenEnc      String
+  accessTokenExpiresAt DateTime @db.Timestamptz(3)
+  /// Scopes Spotify granted (expected: user-read-currently-playing only).
+  scope                String   @default("")
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ---------------------------------------------------------------------------
