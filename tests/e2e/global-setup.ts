@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 
 /**
  * Prepares the database for the browser smoke tests: the *_test database, migrated, emptied and
@@ -12,7 +12,8 @@ export default function globalSetup(): void {
   if (!new URL(url).pathname.endsWith("_test")) {
     throw new Error("TEST_DATABASE_URL must name a separate *_test database: the e2e setup empties it");
   }
-  execFileSync("npx", ["tsx", "tests/e2e/prepare-db.ts"], {
+  // A command string, not an argument list: `npx` is a .cmd file on Windows, which needs a shell.
+  execSync("npx tsx tests/e2e/prepare-db.ts", {
     stdio: "inherit",
     env: { ...process.env, DATABASE_URL: url },
   });

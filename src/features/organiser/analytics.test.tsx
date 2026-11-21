@@ -103,7 +103,9 @@ describe("CheckInTimeline", () => {
   it("draws a bar per non-empty bucket and names the peak", () => {
     const { container } = render(<CheckInTimeline metrics={metrics} />);
     expect(container.querySelectorAll("path")).toHaveLength(2);
-    expect(screen.getByRole("img")).toHaveAccessibleName(/Peak 2 at 20:00 UTC/);
+    // The chart is one image with a summary; each bar is a named image inside it.
+    expect(screen.getByRole("img", { name: /Peak 2 at 20:00 UTC/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "2 check-ins, 20:00 to 20:05 UTC" })).toHaveAttribute("tabindex", "0");
   });
 
   it("shows a tooltip on keyboard focus, with value first", () => {

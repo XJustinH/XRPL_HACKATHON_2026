@@ -1,5 +1,11 @@
 import type { CheckInOverview } from "@/contracts/checkin";
-import { shortAddress } from "@/features/checkin/gate-scanner";
+
+/*
+ * Defined here, not imported from the scanner. That file is a client module, and this is a server
+ * component: on the server the import is only a reference to client code, so calling it threw.
+ * The page rendered until the first check-in gave it an address to shorten, then failed.
+ */
+const shortAddress = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
 /** Entry count and recent admissions for the organiser's gate screen (XRPL-048). */
 export function EntryOverview({ overview }: { overview: CheckInOverview }) {

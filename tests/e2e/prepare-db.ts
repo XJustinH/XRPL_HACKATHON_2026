@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { createPrismaClient } from "@/lib/db/client";
 import { seedDemoData } from "../../scripts/seed/seed-demo-data";
 
@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const url = process.env.DATABASE_URL ?? "";
   if (!new URL(url).pathname.endsWith("_test")) throw new Error("Refusing to empty a database not named *_test");
 
-  execFileSync("npx", ["prisma", "migrate", "deploy"], { stdio: "inherit" });
+  execSync("npx prisma migrate deploy", { stdio: "inherit" });
 
   const db = createPrismaClient(url);
   try {

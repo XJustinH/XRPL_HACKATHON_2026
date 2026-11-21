@@ -54,14 +54,14 @@ describe("SiteHeader", () => {
     const toggle = screen.getByRole("button", { name: "Open main menu" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(
-      screen.queryByRole("navigation", { name: "Mobile" }),
+      screen.queryByRole("navigation", { name: "Menu" }),
     ).not.toBeInTheDocument();
 
     await user.click(toggle);
     expect(
       screen.getByRole("button", { name: "Close main menu" }),
     ).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("navigation", { name: "Mobile" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "Menu" })).toBeVisible();
   });
 
   it("closes the mobile menu on Escape and restores focus to the toggle", async () => {
@@ -74,6 +74,25 @@ describe("SiteHeader", () => {
     const toggle = screen.getByRole("button", { name: "Open main menu" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(toggle).toHaveFocus();
+  });
+
+  it("keeps the menu reachable on wide screens once there are account links", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<SiteHeader session={null} />);
+    // Signed out there are no account links, so wide screens need no menu button.
+    expect(screen.getByRole("button", { name: "Open main menu" })).toHaveClass("md:hidden");
+    unmount();
+
+    render(<SiteHeader session={{ displayName: "Band", role: "SELLER", walletAddress: null }} />);
+    const toggle = screen.getByRole("button", { name: "Open main menu" });
+    expect(toggle).not.toHaveClass("md:hidden");
+    await user.click(toggle);
+
+    // Account links exist only in the menu. Primary links are in the bar on wide screens.
+    const menu = screen.getByRole("navigation", { name: "Menu" });
+    expect(within(menu).getByRole("link", { name: "Following" }).closest("li")).not.toHaveClass("md:hidden");
+    expect(within(menu).getByRole("link", { name: "Your storefront" })).toBeVisible();
+    expect(within(menu).getByRole("link", { name: "Discover" }).closest("li")).toHaveClass("md:hidden");
   });
 
   it("hides seller navigation from customers", () => {

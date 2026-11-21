@@ -86,6 +86,8 @@ export function CheckInTimeline({ metrics }: { metrics: Pick<EventMetrics, "chec
                 height={INNER_H}
                 fill="transparent"
                 tabIndex={0}
+                // A name needs a role: without one, screen readers may ignore the label on a bare shape.
+                role="img"
                 aria-label={`${d.count} check-ins, ${hhmm(d.start)} to ${hhmm(end(i))} UTC`}
                 onPointerEnter={() => setActive(i)}
                 onFocus={() => setActive(i)}

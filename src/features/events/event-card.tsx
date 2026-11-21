@@ -18,8 +18,14 @@ export function EventCard({ event }: { event: EventView }) {
   const totalSupply = event.tiers.reduce((sum, tier) => sum + tier.totalSupply, 0);
 
   return (
-    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition-colors hover:border-accent">
-      <Link href={`/events/${event.id}`} className="block focus-visible:outline-none">
+    /*
+     * The whole card is one link, and `overflow-hidden` cuts off all but one edge of the link's
+     * own focus outline. So the card draws the ring when its link has keyboard focus, and the
+     * link's outline is switched off (`!`, because the global `:focus-visible` rule is unlayered
+     * and would otherwise win).
+     */
+    <article className="group overflow-hidden rounded-card border border-border bg-surface-raised transition-colors hover:border-accent has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-accent">
+      <Link href={`/events/${event.id}`} className="block focus-visible:outline-none!">
         <div className="aspect-[16/9] w-full overflow-hidden bg-surface">
           {artworkUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- arbitrary seller-supplied host
